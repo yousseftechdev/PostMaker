@@ -1,0 +1,50 @@
+[
+  {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null,
+    "output_file": "output.txt",
+    "only": null
+  },
+  {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null,
+    "output_file": "output.txt",
+    "only": null
+  },
+  {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null,
+    "output_file": "output.txt",
+    "only": null
+  },
+  {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null,
+    "output_file": null,
+    "only": null
+  },
+  {
+    "method": "GET",
+    "url": "http://127.0.0.1:5000/api/test",
+    "headers": {},
+    "data": null,
+    "output_file": null,
+    "only": null
+  },
+  {
+    "method": "GET",
+    "url": "http://127.0.0.1:5000/api/test",
+    "headers": {},
+    "data": null,
+    "output_file": null,
+    "only": null
+  }
+]
