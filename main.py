@@ -10,7 +10,9 @@ import uuid
 import difflib
 from rich.syntax import Syntax
 from rich.console import Console
+from rich.table import Table
 import re
+import io
 
 console = Console()
 
@@ -143,10 +145,41 @@ def highlight_headers(headers_dict):
     except Exception:
         print(colored(json.dumps(headers_dict, indent=2), "white"))
 
+def print_response(status_code, reason, headers, body, content_type, only=None, console=console):
+    if only in (None, "status"):
+        status_color = "green" if 200 <= status_code < 300 else "cyan" if 300 <= status_code < 400 else "yellow" if 400 <= status_code < 500 else "red"
+        console.print(f"[bold {status_color}]Status: {status_code} {reason}[/bold {status_color}]")
+    if only in (None, "headers"):
+        table = Table(title="Headers:", show_header=True, header_style="bold magenta", show_lines=True, title_justify="left", title_style="bold magenta")
+        table.add_column("Key", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white")
+        for k, v in headers.items():
+            table.add_row(str(k), str(v))
+        console.print(table)
+    if only in (None, "body"):
+        console.print("[bold yellow]Body:[/bold yellow]")
+        if content_type and "application/json" in content_type:
+            try:
+                parsed = json.loads(body)
+                console.print_json(json.dumps(parsed, indent=2))
+            except Exception:
+                console.print(body, style="white")
+        elif content_type and "html" in content_type:
+            syntax = Syntax(body, "html", theme="monokai", line_numbers=True)
+            console.print(syntax)
+        else:
+            console.print(body, style="white")
+
 def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None):
     method = method.upper()
     headers_input = headers
     data_input = data
+
+    # Convert dicts to JSON strings for variable replacement
+    if isinstance(headers_input, dict):
+        headers_input = json.dumps(headers_input)
+    if isinstance(data_input, dict):
+        data_input = json.dumps(data_input)
 
     # If url is a file, load all URLs from it
     urls = []
@@ -185,50 +218,20 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
 
         try:
             response = requests.request(method, url_to_use, headers=headers_dict, json=data_dict)
-            status_color = color_status(response.status_code)
-            status_line = f"\nStatus: {response.status_code} {response.reason}"
-            headers_str = json.dumps(dict(response.headers), indent=2)
+            content_type = response.headers.get("Content-Type", "")
             try:
                 body_str = json.dumps(response.json(), indent=2)
             except Exception:
                 body_str = response.text
 
-            # Determine what to print/output
-            output_content = ""
-            if only == "status":
-                print(colored(status_line, status_color, attrs=["bold"]))
-                output_content = status_line + "\n"
-            elif only == "headers":
-                print(colored("Headers:", "cyan", attrs=["bold"]))
-                highlight_headers(dict(response.headers))
-                output_content = headers_str + "\n"
-            elif only == "body":
-                print(colored("Body:", "yellow", attrs=["bold"]))
-                content_type = response.headers.get("Content-Type", "")
-                highlight_body(body_str, content_type)
-                output_content = body_str + "\n"
-            else:
-                # Print all
-                print(colored(status_line, status_color, attrs=["bold"]))
-                print(colored("-"*60, "magenta"))
-                print(colored("Headers:", "cyan", attrs=["bold"]))
-                highlight_headers(dict(response.headers))
-                print(colored("-"*60, "magenta"))
-                print(colored("Body:", "yellow", attrs=["bold"]))
-                content_type = response.headers.get("Content-Type", "")
-                highlight_body(body_str, content_type)
-                print(colored("-"*60, "magenta"))
-                output_content = (
-                    status_line + "\n" +
-                    "-"*60 + "\n" +
-                    "Headers:\n" + headers_str + "\n" +
-                    "-"*60 + "\n" +
-                    "Body:\n" + body_str + "\n" +
-                    "-"*60 + "\n"
-                )
-
-            # Output to file if requested
+            # Print response and optionally capture output
             if output_file:
+                buf = io.StringIO()
+                # Use a Rich Console with color disabled for file output
+                file_console = Console(file=buf, color_system=None, force_terminal=False)
+                print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only, console=file_console)
+                output_str = buf.getvalue()
+                buf.close()
                 # If multiple URLs, append index to filename
                 if len(urls) > 1:
                     base, ext = os.path.splitext(output_file)
@@ -236,8 +239,10 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
                 else:
                     out_file = output_file
                 with open(out_file, "w", encoding="utf-8") as f:
-                    f.write(output_content)
+                    f.write(output_str)
                 print(colored(f"Response written to {out_file}", "green", attrs=["bold"]))
+            else:
+                print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only)
 
             # Save to history
             save_history({
@@ -488,7 +493,6 @@ def main():
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                 except SystemExit:
-                    print(colored("Invalid usage. See 'help' or use -h for options.", "red"))
                     continue
                 try:
                     if args.remove:
@@ -534,7 +538,7 @@ def main():
                         else:
                             print_collections(collections)
                 except SystemExit:
-                    parser.print_help()
+                    continue
 
             elif cmd.startswith('save'):
                 parser = argparse.ArgumentParser(
@@ -588,7 +592,7 @@ def main():
                         save_global_aliases(global_aliases)
                         print(colored(f"Request saved as global alias '{alias}'.", "green", attrs=["bold"]))
                 except SystemExit:
-                    parser.print_help()
+                    continue
                 except Exception as e:
                     print(colored(f"Error: {e}", "red", attrs=["bold"]))
             elif cmd.startswith('send'):
@@ -644,7 +648,7 @@ def main():
                         headers.update(auth_headers)
                         request(req['method'], req['url'], json.dumps(headers), json.dumps(req.get('data', {})), output_file, only, assertion=assertion)
                 except SystemExit:
-                    parser.print_help()
+                    continue
                 except Exception as e:
                     print(colored(f"Error: {e}", "red", attrs=["bold"]))
             elif cmd.startswith('request'):
@@ -654,8 +658,8 @@ def main():
                 )
                 parser.add_argument('-m', '--method', required=True, help='[Required] HTTP method (GET, POST, etc)')
                 parser.add_argument('-u', '--url', required=True, help='[Required] Request URL')
-                parser.add_argument('-hd', '--headers', help='[Optional] Headers as JSON string')
-                parser.add_argument('-d', '--data', help='[Optional] Body as JSON string')
+                parser.add_argument('-hd', '--headers', help='[Optional] Headers as JSON string or @file.json')
+                parser.add_argument('-d', '--data', help='[Optional] Body as JSON string or @file.json')
                 parser.add_argument('-o', '--output', help='[Optional] Output response to file')
                 parser.add_argument('--only', choices=['body', 'headers', 'status'], help='[Optional] Output only this part of the response')
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Authentication helper: bearer <token> or basic <user>:<pass>')
@@ -665,8 +669,26 @@ def main():
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     method = args.method.upper()
                     url = args.url
-                    headers = json.loads(args.headers) if args.headers else {}
-                    data = json.loads(args.data) if args.data else None
+
+                    # --- Support loading headers/data from JSON files ---
+                    headers = {}
+                    if args.headers:
+                        if args.headers.strip().startswith('@'):
+                            file_path = args.headers.strip()[1:]
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                headers = json.load(f)
+                        else:
+                            headers = json.loads(args.headers)
+                    data = None
+                    if args.data:
+                        if args.data.strip().startswith('@'):
+                            file_path = args.data.strip()[1:]
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                        else:
+                            data = json.loads(args.data)
+                    # ---------------------------------------------------
+
                     output_file = args.output
                     only = args.only
                     assertion = args.assertion
@@ -681,7 +703,7 @@ def main():
                     headers.update(auth_headers)
                     request(method, url, headers, data, output_file, only, assertion=assertion)
                 except SystemExit:
-                    parser.print_help()
+                    continue
                 except Exception as e:
                     print(colored(f"Error: {e}", "red", attrs=["bold"]))
             elif cmd.startswith('history'):
@@ -773,7 +795,10 @@ def main():
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     import_curl_command(args.curl, args.collection, args.alias)
                 except SystemExit:
-                    parser.print_help()
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+
             elif cmd.startswith('exportcurl'):
                 # Usage: exportcurl alias [-c collection]
                 parser = argparse.ArgumentParser(
@@ -798,7 +823,10 @@ def main():
                     else:
                         print(export_to_curl(req))
                 except SystemExit:
-                    parser.print_help()
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+
             elif cmd.startswith('removeglobal'):
                 # Usage: removeglobal alias
                 parts = cmd.split()
@@ -816,7 +844,6 @@ def main():
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                 except SystemExit:
-                    print(colored("Invalid usage. See 'help' or use -h for options.", "red"))
                     continue
                 # Try to diff history indexes
                 if args.first.isdigit() and args.second.isdigit():
@@ -848,6 +875,22 @@ def main():
                         print_colored_diff(list(diff))
                     else:
                         print(colored("Files not found or invalid arguments.", "red"))
+            elif cmd.startswith('cat '):
+                # Usage: cat <filename>
+                parts = cmd.split(maxsplit=1)
+                if len(parts) == 2:
+                    filename = parts[1].strip()
+                    if os.path.exists(filename):
+                        try:
+                            with open(filename, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            print(content)
+                        except Exception as e:
+                            print(colored(f"cat error: {e}", "red", attrs=["bold"]))
+                    else:
+                        print(colored(f"File '{filename}' not found.", "red"))
+                else:
+                    print(colored("Usage: cat <filename>", "yellow"))
 
 if __name__ == "__main__":
     main()

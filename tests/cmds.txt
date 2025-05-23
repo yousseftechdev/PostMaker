@@ -1,0 +1,64 @@
+# Test GET /api/test
+request -m GET -u http://127.0.0.1:5000/api/test
+
+# Test POST /api/test
+request -m POST -u http://127.0.0.1:5000/api/test -d '{"foo":"bar"}'
+
+# Test PUT /api/test
+request -m PUT -u http://127.0.0.1:5000/api/test -d '{"foo":"bar"}'
+
+# Test DELETE /api/test
+request -m DELETE -u http://127.0.0.1:5000/api/test -d '{"foo":"bar"}'
+
+# Test status codes (e.g., 200, 201, 204, 400, 401, 403, 404, 409, 418, 500)
+request -m GET -u http://127.0.0.1:5000/api/status/200
+request -m GET -u http://127.0.0.1:5000/api/status/201
+request -m GET -u http://127.0.0.1:5000/api/status/204
+request -m GET -u http://127.0.0.1:5000/api/status/400
+request -m GET -u http://127.0.0.1:5000/api/status/401
+request -m GET -u http://127.0.0.1:5000/api/status/403
+request -m GET -u http://127.0.0.1:5000/api/status/404
+request -m GET -u http://127.0.0.1:5000/api/status/409
+request -m GET -u http://127.0.0.1:5000/api/status/418
+request -m GET -u http://127.0.0.1:5000/api/status/500
+
+# Test redirect
+request -m GET -u http://127.0.0.1:5000/api/redirect
+
+# Test authentication (401, 403, 200)
+request -m GET -u http://127.0.0.1:5000/api/auth
+request -m GET -u http://127.0.0.1:5000/api/auth --auth "bearer wrongtoken"
+request -m GET -u http://127.0.0.1:5000/api/auth --auth "bearer testtoken"
+
+# Test validation (400, 422, 201)
+request -m POST -u http://127.0.0.1:5000/api/validation -d '{}'
+request -m POST -u http://127.0.0.1:5000/api/validation -d '{"name":"ab"}'
+request -m POST -u http://127.0.0.1:5000/api/validation -d '{"name":"Alice"}'
+
+# Test timeout (delayed response)
+request -m GET -u http://127.0.0.1:5000/api/timeout
+
+# Test conflict (409, 201)
+request -m POST -u http://127.0.0.1:5000/api/conflict -d '{"id":1}'
+request -m POST -u http://127.0.0.1:5000/api/conflict -d '{"id":2}'
+
+# Test teapot (418)
+request -m GET -u http://127.0.0.1:5000/api/teapot
+
+# Test empty (204)
+request -m GET -u http://127.0.0.1:5000/api/empty
+
+# Test HTML response
+request -m GET -u http://127.0.0.1:5000/api/html
+
+# Test echo (POST)
+request -m POST -u http://127.0.0.1:5000/api/echo -d '{"hello":"world"}'
+
+# Test headers (returns your request headers)
+request -m GET -u http://127.0.0.1:5000/api/headers
+
+# Test large payload
+request -m GET -u http://127.0.0.1:5000/api/large
+
+# Test server error (500)
+request -m GET -u http://127.0.0.1:5000/api/error
