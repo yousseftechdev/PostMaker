@@ -5,21 +5,30 @@ from termcolor import colored
 import shlex
 import argparse
 import os
-from rich import print_json
-import uuid
 import difflib
 from rich.syntax import Syntax
 from rich.console import Console
 from rich.table import Table
 import re
 import io
+import time
+from datetime import datetime
+from rich.markdown import Markdown
+import sys
 
 console = Console()
 
-COLLECTIONS_FILE = "data/collections.json"
-HISTORY_FILE = "data/history.json"
-VARIABLES_FILE = "data/variables.json"
-GLOBAL_ALIASES_FILE = "data/global_aliases.json"
+# Get the absolute directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def rel_path(filename):
+    return os.path.join(SCRIPT_DIR, filename)
+
+COLLECTIONS_FILE = rel_path("data/collections.json")
+HISTORY_FILE = rel_path("data/history.json")
+VARIABLES_FILE = rel_path("data/variables.json")
+GLOBAL_ALIASES_FILE = rel_path("data/global_aliases.json")
+TEMPLATES_FILE = rel_path("data/templates.json")
 
 def color_status(status_code):
     if 200 <= status_code < 300:
@@ -46,14 +55,24 @@ def print_banner():
 def load_collections():
     if os.path.exists(COLLECTIONS_FILE):
         with open(COLLECTIONS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if not content:
+                return {}
+            try:
+                return json.loads(content)
+            except Exception as e:
+                return {}
     return {}
 
 def save_collections(collections):
+    # Ensure data directory exists
+    os.makedirs(os.path.dirname(COLLECTIONS_FILE), exist_ok=True)
     with open(COLLECTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(collections, f, indent=2)
 
 def save_history(entry):
+    # Ensure data directory exists
+    os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
     history = []
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -62,25 +81,41 @@ def save_history(entry):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
 
-def load_variables():
-    if os.path.exists(VARIABLES_FILE):
-        with open(VARIABLES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_variables(vars):
-    with open(VARIABLES_FILE, "w", encoding="utf-8") as f:
-        json.dump(vars, f, indent=2)
-
 def load_global_aliases():
     if os.path.exists(GLOBAL_ALIASES_FILE):
         with open(GLOBAL_ALIASES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if not content:
+                return {}
+            try:
+                return json.loads(content)
+            except Exception:
+                return {}
     return {}
 
-def save_global_aliases(aliases):
-    with open(GLOBAL_ALIASES_FILE, "w", encoding="utf-8") as f:
-        json.dump(aliases, f, indent=2)
+def load_variables():
+    if os.path.exists(VARIABLES_FILE):
+        with open(VARIABLES_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if not content:
+                return {}
+            try:
+                return json.loads(content)
+            except Exception:
+                return {}
+    return {}
+
+def load_templates():
+    if os.path.exists(TEMPLATES_FILE):
+        with open(TEMPLATES_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if not content:
+                return {}
+            try:
+                return json.loads(content)
+            except Exception:
+                return {}
+    return {}
 
 def print_collections(collections):
     if not collections:
@@ -92,6 +127,30 @@ def print_collections(collections):
             print(colored(f"  Alias: {alias}", "cyan"))
             print(colored(f"    Method: {req['method']}", "green"))
             print(colored(f"    URL: {req['url']}", "yellow"))
+            print(colored(f"    Headers: {json.dumps(req.get('headers', {}))}", "white"))
+            print(colored(f"    Data: {json.dumps(req.get('data', {}))}", "white"))
+
+def print_global_aliases(alias=None):
+    global_aliases = load_global_aliases()
+    if not global_aliases:
+        print(colored("No global aliases saved.", "yellow"))
+        return
+    print(colored("Global Aliases:", "magenta", attrs=["bold"]))
+    if alias:
+        req = global_aliases.get(alias)
+        if not req:
+            print(colored(f"Alias '{alias}' not found in global aliases.", "yellow"))
+            return
+        print(colored(f"  Alias: {alias}", "cyan"))
+        print(colored(f"    Method: {req.get('method', '')}", "green"))
+        print(colored(f"    URL: {req.get('url', '')}", "yellow"))
+        print(colored(f"    Headers: {json.dumps(req.get('headers', {}))}", "white"))
+        print(colored(f"    Data: {json.dumps(req.get('data', {}))}", "white"))
+    else:
+        for alias, req in global_aliases.items():
+            print(colored(f"  Alias: {alias}", "cyan"))
+            print(colored(f"    Method: {req.get('method', '')}", "green"))
+            print(colored(f"    URL: {req.get('url', '')}", "yellow"))
             print(colored(f"    Headers: {json.dumps(req.get('headers', {}))}", "white"))
             print(colored(f"    Data: {json.dumps(req.get('data', {}))}", "white"))
 
@@ -145,7 +204,9 @@ def highlight_headers(headers_dict):
     except Exception:
         print(colored(json.dumps(headers_dict, indent=2), "white"))
 
-def print_response(status_code, reason, headers, body, content_type, only=None, console=console):
+def print_response(status_code, reason, headers, body, content_type, only=None, console=console, elapsed=None, size=None):
+    if elapsed is not None and size is not None:
+        console.print(f"[bold blue]Time:[/bold blue] {elapsed:.2f} ms  [bold blue]Size:[/bold blue] {format_size(size)}")
     if only in (None, "status"):
         status_color = "green" if 200 <= status_code < 300 else "cyan" if 300 <= status_code < 400 else "yellow" if 400 <= status_code < 500 else "red"
         console.print(f"[bold {status_color}]Status: {status_code} {reason}[/bold {status_color}]")
@@ -170,18 +231,20 @@ def print_response(status_code, reason, headers, body, content_type, only=None, 
         else:
             console.print(body, style="white")
 
-def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None):
+def format_size(num):
+    for unit in ['B','KB','MB','GB']:
+        if num < 1024.0:
+            return f"{num:.2f} {unit}"
+        num /= 1024.0
+    return f"{num:.2f} TB"
+
+def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, render=False):
     method = method.upper()
-    headers_input = headers
-    data_input = data
+    if headers is None:
+        headers = {}
+    if data == {}:
+        data = None
 
-    # Convert dicts to JSON strings for variable replacement
-    if isinstance(headers_input, dict):
-        headers_input = json.dumps(headers_input)
-    if isinstance(data_input, dict):
-        data_input = json.dumps(data_input)
-
-    # If url is a file, load all URLs from it
     urls = []
     if isinstance(url, str) and os.path.isfile(url):
         with open(url, "r", encoding="utf-8") as f:
@@ -190,19 +253,21 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
         urls = [url.strip()]
 
     for single_url in urls:
-        # Replace variables in URL, headers, and data
         vars = load_variables()
         url_to_use = single_url
-        headers_to_use = headers_input
-        data_to_use = data_input
+        headers_to_use = headers.copy()
+        data_to_use = data.copy() if isinstance(data, dict) else data
         for k, v in vars.items():
             url_to_use = url_to_use.replace(f"{{{{{k}}}}}", v)
             if headers_to_use:
-                headers_to_use = headers_to_use.replace(f"{{{{{k}}}}}", v)
-            if data_to_use:
-                data_to_use = data_to_use.replace(f"{{{{{k}}}}}", v)
+                for hk in list(headers_to_use.keys()):
+                    if isinstance(headers_to_use[hk], str):
+                        headers_to_use[hk] = headers_to_use[hk].replace(f"{{{{{k}}}}}", v)
+            if isinstance(data_to_use, dict):
+                for dk in list(data_to_use.keys()):
+                    if isinstance(data_to_use[dk], str):
+                        data_to_use[dk] = data_to_use[dk].replace(f"{{{{{k}}}}}", v)
 
-        # Parse auth if provided
         auth_headers = {}
         if auth:
             try:
@@ -211,47 +276,38 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
             except Exception as e:
                 print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                 continue
+        headers_to_use.update(auth_headers)
 
-        headers_dict = json.loads(headers_to_use) if headers_to_use else {}
-        headers_dict.update(auth_headers)
-        data_dict = json.loads(data_to_use) if data_to_use else None
+        if preview:
+            print_request_preview(method, url_to_use, headers_to_use, data_to_use)
+            confirm = input(colored("Send this request? (y/N): ", "yellow"))
+            if confirm.lower() != "y":
+                print(colored("Cancelled.", "yellow"))
+                continue
 
         try:
-            response = requests.request(method, url_to_use, headers=headers_dict, json=data_dict)
+            start = time.time()
+            response = requests.request(method, url_to_use, headers=headers_to_use, json=data_to_use)
+            elapsed = (time.time() - start) * 1000  # ms
             content_type = response.headers.get("Content-Type", "")
             try:
                 body_str = json.dumps(response.json(), indent=2)
             except Exception:
                 body_str = response.text
-
-            # Print response and optionally capture output
-            if output_file:
-                buf = io.StringIO()
-                # Use a Rich Console with color disabled for file output
-                file_console = Console(file=buf, color_system=None, force_terminal=False)
-                print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only, console=file_console)
-                output_str = buf.getvalue()
-                buf.close()
-                # If multiple URLs, append index to filename
-                if len(urls) > 1:
-                    base, ext = os.path.splitext(output_file)
-                    out_file = f"{base}_{urls.index(single_url)}{ext}"
-                else:
-                    out_file = output_file
-                with open(out_file, "w", encoding="utf-8") as f:
-                    f.write(output_str)
-                print(colored(f"Response written to {out_file}", "green", attrs=["bold"]))
-            else:
-                print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only)
-
+            resp_size = len(response.content)
+            print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
             # Save to history
             save_history({
                 "method": method,
                 "url": url_to_use,
-                "headers": headers_dict,
-                "data": data_dict,
+                "headers": headers_to_use,
+                "data": data_to_use,
                 "output_file": output_file,
-                "only": only
+                "only": only,
+                "status": response.status_code,
+                "elapsed": elapsed,
+                "size": resp_size,
+                "date": datetime.now().isoformat()
             })
 
             # Handle assertions
@@ -271,6 +327,13 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
 
         except Exception as e:
             print(colored(f"Error: {e}", "red", attrs=["bold"]))
+
+def print_request_preview(method, url, headers, data):
+    print(colored("REQUEST PREVIEW", "magenta", attrs=["bold"]))
+    print(colored(f"Method: {method}", "green"))
+    print(colored(f"URL: {url}", "yellow"))
+    print(colored(f"Headers: {json.dumps(headers, indent=2)}", "white"))
+    print(colored(f"Data: {json.dumps(data, indent=2) if data else None}", "white"))
 
 def import_curl_command(curl_command, collection=None, alias=None):
     """
@@ -375,6 +438,21 @@ def clear_history():
     else:
         print(colored("No history file found.", "yellow"))
 
+def save_global_aliases(aliases):
+    os.makedirs(os.path.dirname(GLOBAL_ALIASES_FILE), exist_ok=True)
+    with open(GLOBAL_ALIASES_FILE, "w", encoding="utf-8") as f:
+        json.dump(aliases, f, indent=2)
+
+def save_variables(vars):
+    os.makedirs(os.path.dirname(VARIABLES_FILE), exist_ok=True)
+    with open(VARIABLES_FILE, "w", encoding="utf-8") as f:
+        json.dump(vars, f, indent=2)
+
+def save_templates(templates):
+    os.makedirs(os.path.dirname(TEMPLATES_FILE), exist_ok=True)
+    with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
+        json.dump(templates, f, indent=2)
+
 def clear_variables():
     vars = load_variables()
     if vars:
@@ -443,11 +521,35 @@ def print_colored_diff(diff_lines):
         else:
             print(line)
 
+def interactive_mode():
+    print(colored("Interactive Request Builder", "magenta", attrs=["bold"]))
+    method = input("HTTP method (GET/POST/...): ").strip().upper()
+    url = input("URL: ").strip()
+    headers = {}
+    while True:
+        h = input("Add header (key:value) or blank to finish: ").strip()
+        if not h: break
+        if ':' in h:
+            k, v = h.split(':', 1)
+            headers[k.strip()] = v.strip()
+    data = input("Body (JSON or blank): ").strip()
+    data_obj = json.loads(data) if data else None
+    print_request_preview(method, url, headers, data_obj)
+    if input("Send this request? (y/N): ").lower() == "y":
+        request(method, url, headers, data_obj)
+    else:
+        print(colored("Cancelled.", "yellow"))
+
 def main():
+    ensure_data_files()  # <-- Ensure files/folders exist and are initialized
     print_banner()
     collections = load_collections()
     while True:
-        cmd = input(colored("> ", "magenta", attrs=["bold"]))
+        try:
+            cmd = input(colored("> ", "magenta", attrs=["bold"]))
+        except EOFError:
+            print()
+            break
         if cmd != '':
             cmd = cmd.strip()
             if cmd.startswith('exit'):
@@ -457,23 +559,39 @@ def main():
             elif cmd.startswith('help'):
                 print(colored("Available commands:", "blue", attrs=["bold"]))
                 print(colored("request - Make an HTTP request", "green"))
-                print(colored("save - Save a request to a collection", "yellow"))
-                print(colored("collections - List all collections and requests", "cyan"))
-                print(colored("send <alias> [--output file] [--only body|headers|status] - Send a saved request by alias", "magenta"))
-                print(colored("history - View or clear request history", "cyan"))
-                print(colored("replay <index> - Replay a request from history", "magenta"))
-                print(colored("chain <filename> - Run a chain of requests from a file", "cyan"))
-                print(colored("setvar key value - Set a variable", "green"))
+                print(colored("save - Save a request to a collection or as a global alias", "yellow"))
+                print(colored("send - Send a saved request by alias", "magenta"))
+                print(colored("collections - List, view, or manage collections and items", "cyan"))
+                print(colored("globalaliases - List all global aliases or show a specific alias", "magenta"))
                 print(colored("vars - View, remove, or clear variables", "yellow"))
-                print(colored("importcurl \"<curl command>\" -a alias [-c collection] - Import a cURL command", "green"))
-                print(colored("exportcurl <alias> [-c collection] - Export a saved request as cURL", "yellow"))
-                print(colored("removeglobal <alias> - Remove a global alias", "yellow"))
-                print(colored("diff <history_index1> <history_index2> OR diff <file1> <file2> - Diff two responses", "magenta"))
-                print(colored("exit - Exit the program", "red"))
+                print(colored("setvar - Set a variable", "green"))
+                print(colored("history - View or clear request history", "cyan"))
+                print(colored("replay - Replay a request from history", "magenta"))
+                print(colored("chain - Run a chain of requests from a file", "cyan"))
+                print(colored("diff - Diff two responses (from history or files)", "magenta"))
+                print(colored("importcurl - Import a cURL command as a saved request", "green"))
+                print(colored("exportcurl - Export a saved request as a cURL command", "yellow"))
+                print(colored("removeglobal - Remove a global alias", "yellow"))
+                print(colored("template - Manage request templates (save, list, use, delete)", "cyan"))
+                print(colored("export - Export data (collections, aliases, variables, templates, or all)", "yellow"))
+                print(colored("import - Import data from a file", "yellow"))
+                print(colored("cat - View the contents of a file", "cyan"))
+                print(colored("interactive - Interactive request builder", "green"))
                 print(colored("clear - Clear the screen", "cyan"))
+                print(colored("exit - Exit the program", "red"))
             elif cmd.startswith('clear'):
                 print("\033c", end="")
-                # print_banner()
+            elif cmd.startswith('globalaliases'):
+                parser = argparse.ArgumentParser(
+                    prog='globalaliases',
+                    description='List all global aliases or show a specific alias'
+                )
+                parser.add_argument('-a', '--alias', help='[Optional] Show only this alias')
+                try:
+                    args = parser.parse_args(shlex.split(cmd)[1:])
+                except SystemExit:
+                    continue
+                print_global_aliases(alias=args.alias)
             elif cmd.startswith('collections'):
                 parser = argparse.ArgumentParser(
                     prog='collections',
@@ -488,7 +606,7 @@ def main():
                 )
                 parser.add_argument('-c', '--collection', help='[Optional] Show only this collection')
                 parser.add_argument('-a', '--alias', help='[Optional] Show only this alias (requires --collection)')
-                parser.add_argument('-del', '--delete', metavar='TARGET', help='[Optional] Delete a collection')
+                parser.add_argument('-del', '--delete', metavar='TARGET', help='[Optional] Remove a specific collection')
                 parser.add_argument('-rm', '--remove', metavar='TARGET', help='[Optional] Remove a specific alias from a collection (format: collection:alias)')
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
@@ -568,6 +686,9 @@ def main():
                             print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                             return
                     headers.update(auth_headers)
+                    # Always store data as None if empty or {}
+                    if not data or data == {}:
+                        data = None
                     if args.collection:
                         # Save to collection
                         if args.collection not in collections:
@@ -598,14 +719,16 @@ def main():
             elif cmd.startswith('send'):
                 parser = argparse.ArgumentParser(
                     prog='send',
-                    description='Send a saved request by alias. Example: send myalias [--output file] [--only body|headers|status]'
+                    description='Send a saved request by alias. Example: send -a myalias [--output file] [--only body|headers|status]'
                 )
-                parser.add_argument('alias', help='[Required] Alias of the saved request')
+                parser.add_argument('-a', '--alias', required=True, help='[Required] Alias of the saved request')
                 parser.add_argument('-c', '--collection', help='[Optional] Collection name (default: search global aliases)')
                 parser.add_argument('-o', '--output', help='[Optional] Output response to file')
                 parser.add_argument('--only', choices=['body', 'headers', 'status'], help='[Optional] Output only this part of the response')
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Override authentication for this request')
                 parser.add_argument('--assertion', help='[Optional] Assertion to validate response (e.g., status=200, body_contains=keyword)')
+                parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
+                # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     alias = args.alias
@@ -613,7 +736,10 @@ def main():
                     output_file = args.output
                     only = args.only
                     assertion = args.assertion
+                    preview = args.preview
+                    # REMOVED: render = args.render
                     auth_headers = {}
+
                     if args.auth:
                         try:
                             auth_type, auth_value = args.auth.split(" ", 1)
@@ -621,32 +747,46 @@ def main():
                         except Exception as e:
                             print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                             return
-                    found = False
+
                     req = None
                     if collection:
                         reqs = collections.get(collection, {})
                         req = reqs.get(alias)
-                        if req:
-                            found = True
                     else:
                         # Search global aliases first
                         global_aliases = load_global_aliases()
-                        if alias in global_aliases:
-                            req = global_aliases[alias]
-                            found = True
-                        else:
-                            # Optionally, search all collections for alias as fallback
-                            for coll, reqs in collections.items():
-                                if alias in reqs:
-                                    req = reqs[alias]
-                                    found = True
-                                    break
-                    if not found or not req:
-                        print(colored(f"Alias '{alias}' not found.", "red", attrs=["bold"]))
+                        req = global_aliases.get(alias)
+                        if not req:
+                            print(colored(
+                                f"Alias '{alias}' not found in global aliases. "
+                                f"Did you mean to specify a collection with -c <collection>?",
+                                "red", attrs=["bold"]))
+                            continue
+                        # Fallback: search all collections (optional, can be removed if you want strict global/collection separation)
+                        # for coll, reqs in collections.items():
+                        #     if alias in reqs:
+                        #         req = reqs[alias]
+                        #         break
+
+                    if not req:
+                        print(colored(f"Alias '{alias}' not found in collection '{collection}'.", "red", attrs=["bold"]))
                     else:
-                        headers = req.get('headers', {})
+                        headers = dict(req.get('headers') or {})
                         headers.update(auth_headers)
-                        request(req['method'], req['url'], json.dumps(headers), json.dumps(req.get('data', {})), output_file, only, assertion=assertion)
+                        data = req.get('data', None)
+                        if data == {}:
+                            data = None
+                        request(
+                            req['method'],
+                            req['url'],
+                            headers,
+                            data,
+                            output_file,
+                            only,
+                            assertion=assertion,
+                            preview=preview,
+                            render=False  # Always False, feature removed
+                        )
                 except SystemExit:
                     continue
                 except Exception as e:
@@ -664,7 +804,8 @@ def main():
                 parser.add_argument('--only', choices=['body', 'headers', 'status'], help='[Optional] Output only this part of the response')
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Authentication helper: bearer <token> or basic <user>:<pass>')
                 parser.add_argument('--assert', dest='assertion', help='[Optional] Assertion, e.g. status=200 or body_contains=foo')
-
+                parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
+                # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     method = args.method.upper()
@@ -693,6 +834,8 @@ def main():
                     only = args.only
                     assertion = args.assertion
                     auth_headers = {}
+                    preview = args.preview
+                    # REMOVED: render = args.render
                     if args.auth:
                         try:
                             auth_type, auth_value = args.auth.split(" ", 1)
@@ -701,7 +844,7 @@ def main():
                             print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                             return
                     headers.update(auth_headers)
-                    request(method, url, headers, data, output_file, only, assertion=assertion)
+                    request(method, url, headers, data, output_file, only, assertion=assertion, preview=preview, render=False)
                 except SystemExit:
                     continue
                 except Exception as e:
@@ -712,6 +855,8 @@ def main():
                     description='View or clear request history.'
                 )
                 parser.add_argument('-cl', '--clear', action='store_true', help='[Optional] Clear all request history')
+                parser.add_argument('-n', '--number', type=int, help='Show N most recent entries')
+                parser.add_argument('-s', '--search', help='Search by URL or method')
                 args = parser.parse_args(shlex.split(cmd)[1:])
                 if args.clear:
                     clear_history()
@@ -719,8 +864,13 @@ def main():
                     if os.path.exists(HISTORY_FILE):
                         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                             history = json.load(f)
-                        for i, entry in enumerate(history):
-                            print(colored(f"[{i}] {entry['method']} {entry['url']}", "cyan"))
+                        entries = history
+                        if args.search:
+                            entries = [e for e in entries if args.search.lower() in e["url"].lower() or args.search.lower() in e["method"].lower()]
+                        if args.number:
+                            entries = entries[-args.number:]
+                        for i, entry in enumerate(entries):
+                            print(colored(f"[{i}] {entry['method']} {entry['url']}  status={entry.get('status','?')}  time={entry.get('elapsed',0):.1f}ms  size={format_size(entry.get('size',0))}  date={entry.get('date','')}", "cyan"))
                     else:
                         print(colored("No history found.", "yellow"))
             elif cmd.startswith('replay'):
@@ -891,6 +1041,94 @@ def main():
                         print(colored(f"File '{filename}' not found.", "red"))
                 else:
                     print(colored("Usage: cat <filename>", "yellow"))
+            elif cmd.startswith('template'):
+                parser = argparse.ArgumentParser(
+                    prog='template',
+                    description='Manage request templates.\n'
+                                'Examples:\n'
+                                '  template save -n mytemplate -m GET -u https://example.com -hd \'{"Authorization":"token"}\' -d \'{"key":"value"}\'\n'
+                                '  template list\n'
+                                '  template use -n mytemplate\n'
+                                '  template delete -n mytemplate'
+                )
+                subparsers = parser.add_subparsers(dest='subcmd', required=True)
+
+                # Save
+                save_parser = subparsers.add_parser('save', help='Save a new template')
+                save_parser.add_argument('-n', '--name', required=True, help='Template name')
+                save_parser.add_argument('-m', '--method', required=True, help='HTTP method')
+                save_parser.add_argument('-u', '--url', required=True, help='Request URL')
+                save_parser.add_argument('-hd', '--headers', default="{}", help='Headers as JSON string')
+                save_parser.add_argument('-d', '--data', default="{}", help='Body as JSON string')
+
+                # List
+                list_parser = subparsers.add_parser('list', help='List all templates')
+
+                # Use
+                use_parser = subparsers.add_parser('use', help='Use a template')
+                use_parser.add_argument('-n', '--name', required=True, help='Template name')
+
+                # Delete
+                delete_parser = subparsers.add_parser('delete', help='Delete a template')
+                delete_parser.add_argument('-n', '--name', required=True, help='Template name')
+
+                try:
+                    args = parser.parse_args(shlex.split(cmd)[1:])
+                    if args.subcmd == 'save':
+                        headers = json.loads(args.headers)
+                        data = json.loads(args.data)
+                        template_save(args.name, args.method, args.url, headers, data)
+                    elif args.subcmd == 'list':
+                        template_list()
+                    elif args.subcmd == 'use':
+                        template_use(args.name)
+                    elif args.subcmd == 'delete':
+                        templates = load_templates()
+                        if args.name in templates:
+                            templates.pop(args.name)
+                            save_templates(templates)
+                            print(colored(f"Template '{args.name}' deleted.", "green"))
+                        else:
+                            print(colored(f"Template '{args.name}' not found.", "yellow"))
+                except SystemExit:
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            elif cmd.startswith('export'):
+                parser = argparse.ArgumentParser(
+                    prog='export',
+                    description='Export data to a file.\n'
+                                'Examples:\n'
+                                '  export -t all -f <file>\n'
+                                '  export -t collections -f <file>\n'
+                                '  export -t aliases -f <file>'
+                )
+                parser.add_argument('-t', '--target', required=True, help='[Required] Export target (all, collections, aliases, variables, templates)')
+                parser.add_argument('-f', '--file', required=True, help='[Required] Output file')
+                try:
+                    args = parser.parse_args(shlex.split(cmd)[1:])
+                    export_data(args.target, args.file)
+                except SystemExit:
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            elif cmd.startswith('import'):
+                parser = argparse.ArgumentParser(
+                    prog='import',
+                    description='Import data from a file.'
+                )
+                parser.add_argument('-f', '--file', required=True, help='[Required] Input file')
+                try:
+                    args = parser.parse_args(shlex.split(cmd)[1:])
+                    import_data(args.file)
+                except SystemExit:
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            elif cmd.startswith('interactive'):
+                interactive_mode()
+            else:
+                print(colored("Invalid command. Type 'help' for a list of commands.", "red", attrs=["bold"]))
 
 if __name__ == "__main__":
     main()

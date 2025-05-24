@@ -1,0 +1,8 @@
+{
+  "example": {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null
+  }
+}

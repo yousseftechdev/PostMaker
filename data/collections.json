@@ -4,7 +4,9 @@
       "method": "GET",
       "url": "https://example.com",
       "headers": {},
-      "data": null
+      "data": {
+        "key": "value"
+      }
     },
     "local": {
       "method": "GET",
