@@ -20,16 +20,17 @@ from rich.align import Align
 
 console = Console()
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+EXECUTION_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def rel_path(filename):
-    return os.path.join(SCRIPT_DIR, filename)
+    return os.path.join(EXECUTION_DIR, filename)
 
 COLLECTIONS_FILE = rel_path("data/collections.json")
 HISTORY_FILE = rel_path("data/history.json")
 VARIABLES_FILE = rel_path("data/variables.json")
 GLOBAL_ALIASES_FILE = rel_path("data/global_aliases.json")
 TEMPLATES_FILE = rel_path("data/templates.json")
+SCRIPTS_DIR = rel_path("scripts")
 
 def ensure_data_files():
     data_files = [
@@ -49,6 +50,14 @@ def ensure_data_files():
                     json.dump([], f)
                 else:
                     json.dump({}, f)
+
+def ensure_scripts_folder():
+    os.makedirs(SCRIPTS_DIR, exist_ok=True)
+    for i in range(1, 6):
+        script_path = os.path.join(SCRIPTS_DIR, f"{i}.py")
+        if not os.path.exists(script_path):
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(f'# {i}.py - User script\nprint("Script {i} ran")\n')
 
 def color_status(status_code):
     if 200 <= status_code < 300:
@@ -405,18 +414,34 @@ Boydy:
             })
 
             if assertion:
-                if assertion.startswith("status="):
-                    expected = int(assertion.split("=", 1)[1])
+                cond, script_num = assertion, None
+                if ',' in assertion:
+                    cond, script_num = assertion.split(',', 1)
+                    script_num = script_num.strip()
+                passed = False
+                if cond.startswith("status="):
+                    expected = int(cond.split("=", 1)[1])
                     if resp.status_code == expected:
                         print(colored(f"Assertion passed: status={expected}", "green"))
+                        passed = True
                     else:
                         print(colored(f"Assertion failed: status={resp.status_code} (expected {expected})", "red"))
-                elif assertion.startswith("body_contains="):
-                    expected = assertion.split("=", 1)[1]
+                elif cond.startswith("body_contains="):
+                    expected = cond.split("=", 1)[1]
                     if expected in body_str:
                         print(colored(f"Assertion passed: body contains '{expected}'", "green"))
+                        passed = True
                     else:
                         print(colored(f"Assertion failed: body does not contain '{expected}'", "red"))
+
+                # Run script if assertion passed and script_num is valid (1-5)
+                if passed and script_num and script_num.isdigit() and 1 <= int(script_num) <= 5:
+                    script_path = os.path.join(SCRIPTS_DIR, f"{script_num}.py")
+                    if os.path.exists(script_path):
+                        print(colored(f"Running script {script_num}...", "cyan"))
+                        os.system(f'python "{script_path}"')
+                    else:
+                        print(colored(f"Script {script_num} not found.", "red"))
 
         except Exception as e:
             print(colored(f"Error: {e}", "red", attrs=["bold"]))
@@ -619,8 +644,107 @@ def interactive_mode():
     else:
         print(colored("Cancelled.", "yellow"))
 
+def template_save(name, method, url, headers, data):
+    templates = load_templates()
+    templates[name] = {
+        "method": method,
+        "url": url,
+        "headers": headers,
+        "data": data
+    }
+    save_templates(templates)
+    print(colored(f"Template '{name}' saved.", "green"))
+
+def template_list():
+    templates = load_templates()
+    if not templates:
+        print(colored("No templates saved.", "yellow"))
+        return
+    print(colored("Templates:", "magenta", attrs=["bold"]))
+    for name, tpl in templates.items():
+        print(colored(f"  Name: {name}", "cyan"))
+        print(colored(f"    Method: {tpl['method']}", "green"))
+        print(colored(f"    URL: {tpl['url']}", "yellow"))
+        print(colored(f"    Headers: {json.dumps(tpl.get('headers', {}))}", "white"))
+        print(colored(f"    Data: {json.dumps(tpl.get('data', {}))}", "white"))
+
+def template_use(name):
+    templates = load_templates()
+    tpl = templates.get(name)
+    if not tpl:
+        print(colored(f"Template '{name}' not found.", "yellow"))
+        return
+    print_request_preview(tpl['method'], tpl['url'], tpl.get('headers', {}), tpl.get('data', {}))
+    if input("Send this request? (y/N): ").lower() == "y":
+        request(
+            tpl['method'],
+            tpl['url'],
+            tpl.get('headers', {}),
+            tpl.get('data', {}),
+            fill_vars=True
+        )
+    else:
+        print(colored("Cancelled.", "yellow"))
+
+def export_data(target, filename):
+    data = {}
+    if target == "all":
+        data = {
+            "collections": load_collections(),
+            "aliases": load_global_aliases(),
+            "variables": load_variables(),
+            "templates": load_templates()
+        }
+    elif target == "collections":
+        data = load_collections()
+    elif target == "aliases":
+        data = load_global_aliases()
+    elif target == "variables":
+        data = load_variables()
+    elif target == "templates":
+        data = load_templates()
+    else:
+        print(colored(f"Unknown export target: {target}", "red"))
+        return
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    print(colored(f"Exported {target} to {filename}", "green"))
+
+def import_data(filename):
+    if not os.path.exists(filename):
+        print(colored(f"File '{filename}' not found.", "red"))
+        return
+    with open(filename, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict) and any(k in data for k in ("collections", "aliases", "variables", "templates")):
+        if "collections" in data:
+            save_collections(data["collections"])
+        if "aliases" in data:
+            save_global_aliases(data["aliases"])
+        if "variables" in data:
+            save_variables(data["variables"])
+        if "templates" in data:
+            save_templates(data["templates"])
+        print(colored(f"Imported all data from {filename}", "green"))
+    else:
+        if isinstance(data, dict) and all(isinstance(v, dict) for v in data.values()):
+            if all("method" in v and "url" in v for v in data.values()):
+                save_global_aliases(data)
+                print(colored(f"Imported aliases from {filename}", "green"))
+            else:
+                save_collections(data)
+                print(colored(f"Imported collections from {filename}", "green"))
+        elif isinstance(data, dict):
+            save_variables(data)
+            print(colored(f"Imported variables from {filename}", "green"))
+        elif isinstance(data, list):
+            print(colored("Importing lists is not supported.", "red"))
+        else:
+            print(colored("Unknown data format for import.", "red"))
+
 def main():
     ensure_data_files()
+    ensure_scripts_folder()
     print_banner()
     collections = load_collections()
     while True:
@@ -881,7 +1005,7 @@ def main():
                 parser.add_argument('-o', '--output', help='[Optional] Output response to file')
                 parser.add_argument('--only', choices=['body', 'headers', 'status'], help='[Optional] Output only this part of the response')
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Authentication helper: bearer <token> or basic <user>:<pass>')
-                parser.add_argument('--assert', dest='assertion', help='[Optional] Assertion, e.g. status=200 or body_contains=foo')
+                parser.add_argument('-as', '--assert', dest='assertion', help='[Optional] Assertion, e.g. status=200 or body_contains=foo')
                 parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
                 parser.add_argument('-fv', '--fillvars', action='store_true', help='[Optional] Fill placeholders in the request (prompt for variables)')
                 # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
@@ -1249,105 +1373,7 @@ def main():
             elif cmd.startswith('interactive'):
                 interactive_mode()
             else:
-                print(colored("Invalid command. Type 'help' for a list of commands.", "red", attrs=["bold"]))
-
-def template_save(name, method, url, headers, data):
-    templates = load_templates()
-    templates[name] = {
-        "method": method,
-        "url": url,
-        "headers": headers,
-        "data": data
-    }
-    save_templates(templates)
-    print(colored(f"Template '{name}' saved.", "green"))
-
-def template_list():
-    templates = load_templates()
-    if not templates:
-        print(colored("No templates saved.", "yellow"))
-        return
-    print(colored("Templates:", "magenta", attrs=["bold"]))
-    for name, tpl in templates.items():
-        print(colored(f"  Name: {name}", "cyan"))
-        print(colored(f"    Method: {tpl['method']}", "green"))
-        print(colored(f"    URL: {tpl['url']}", "yellow"))
-        print(colored(f"    Headers: {json.dumps(tpl.get('headers', {}))}", "white"))
-        print(colored(f"    Data: {json.dumps(tpl.get('data', {}))}", "white"))
-
-def template_use(name):
-    templates = load_templates()
-    tpl = templates.get(name)
-    if not tpl:
-        print(colored(f"Template '{name}' not found.", "yellow"))
-        return
-    print_request_preview(tpl['method'], tpl['url'], tpl.get('headers', {}), tpl.get('data', {}))
-    if input("Send this request? (y/N): ").lower() == "y":
-        request(
-            tpl['method'],
-            tpl['url'],
-            tpl.get('headers', {}),
-            tpl.get('data', {}),
-            fill_vars=True
-        )
-    else:
-        print(colored("Cancelled.", "yellow"))
-
-def export_data(target, filename):
-    data = {}
-    if target == "all":
-        data = {
-            "collections": load_collections(),
-            "aliases": load_global_aliases(),
-            "variables": load_variables(),
-            "templates": load_templates()
-        }
-    elif target == "collections":
-        data = load_collections()
-    elif target == "aliases":
-        data = load_global_aliases()
-    elif target == "variables":
-        data = load_variables()
-    elif target == "templates":
-        data = load_templates()
-    else:
-        print(colored(f"Unknown export target: {target}", "red"))
-        return
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    print(colored(f"Exported {target} to {filename}", "green"))
-
-def import_data(filename):
-    if not os.path.exists(filename):
-        print(colored(f"File '{filename}' not found.", "red"))
-        return
-    with open(filename, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if isinstance(data, dict) and any(k in data for k in ("collections", "aliases", "variables", "templates")):
-        if "collections" in data:
-            save_collections(data["collections"])
-        if "aliases" in data:
-            save_global_aliases(data["aliases"])
-        if "variables" in data:
-            save_variables(data["variables"])
-        if "templates" in data:
-            save_templates(data["templates"])
-        print(colored(f"Imported all data from {filename}", "green"))
-    else:
-        if isinstance(data, dict) and all(isinstance(v, dict) for v in data.values()):
-            if all("method" in v and "url" in v for v in data.values()):
-                save_global_aliases(data)
-                print(colored(f"Imported aliases from {filename}", "green"))
-            else:
-                save_collections(data)
-                print(colored(f"Imported collections from {filename}", "green"))
-        elif isinstance(data, dict):
-            save_variables(data)
-            print(colored(f"Imported variables from {filename}", "green"))
-        elif isinstance(data, list):
-            print(colored("Importing lists is not supported.", "red"))
-        else:
-            print(colored("Unknown data format for import.", "red"))
+                print(colored(f"Invalid command: '{cmd.split()[0]}'. Type 'help' for a list of commands.", "red", attrs=["bold"]))
 
 if __name__ == "__main__":
     main()
