@@ -31,13 +31,18 @@
 
 ## Getting Started
 
-### 1. Install Requirements
+- ### Downloading and running binary:
+Check out the [releases](https://github.com/yousseftechdev/PostMaker/releases) section. PostMaker is with Windows, Linux, and MacOS
+
+- ### Running the python script instead:
+
+#### 1. Install Requirements
 
 ```sh
 pip install requests termcolor rich
 ```
 
-### 2. Run PostMaker
+#### 2. Run PostMaker
 
 ```sh
 python main.py
