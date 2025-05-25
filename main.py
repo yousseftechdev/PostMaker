@@ -1,24 +1,23 @@
 # PostMaker -- A simple TUI PostMan clone for testing REST APIs
-import requests
 import json
-from termcolor import colored
 import shlex
 import argparse
 import os
-import difflib
+import requests
+from difflib import unified_diff
+from time import time
+from re import match
+from termcolor import colored
 from rich.syntax import Syntax
 from rich.console import Console
 from rich.table import Table
-import re
-import io
-import time
 from datetime import datetime
 from rich.markdown import Markdown
-import sys
+from rich.columns import Columns
+from rich.panel import Panel
 
 console = Console()
 
-# Get the absolute directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def rel_path(filename):
@@ -29,6 +28,25 @@ HISTORY_FILE = rel_path("data/history.json")
 VARIABLES_FILE = rel_path("data/variables.json")
 GLOBAL_ALIASES_FILE = rel_path("data/global_aliases.json")
 TEMPLATES_FILE = rel_path("data/templates.json")
+
+def ensure_data_files():
+    data_files = [
+        COLLECTIONS_FILE,
+        HISTORY_FILE,
+        VARIABLES_FILE,
+        GLOBAL_ALIASES_FILE,
+        TEMPLATES_FILE
+    ]
+    for file in data_files:
+        folder = os.path.dirname(file)
+        if not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+        if not os.path.exists(file) or os.path.getsize(file) == 0:
+            with open(file, "w", encoding="utf-8") as f:
+                if file == HISTORY_FILE:
+                    json.dump([], f)
+                else:
+                    json.dump({}, f)
 
 def color_status(status_code):
     if 200 <= status_code < 300:
@@ -65,13 +83,11 @@ def load_collections():
     return {}
 
 def save_collections(collections):
-    # Ensure data directory exists
     os.makedirs(os.path.dirname(COLLECTIONS_FILE), exist_ok=True)
     with open(COLLECTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(collections, f, indent=2)
 
 def save_history(entry):
-    # Ensure data directory exists
     os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
     history = []
     if os.path.exists(HISTORY_FILE):
@@ -155,9 +171,6 @@ def print_global_aliases(alias=None):
             print(colored(f"    Data: {json.dumps(req.get('data', {}))}", "white"))
 
 def parse_auth(auth_type, auth_value):
-    """
-    Returns a headers dict for the given auth type and value.
-    """
     if not auth_type or not auth_value:
         return {}
     if auth_type == "bearer":
@@ -173,9 +186,6 @@ def parse_auth(auth_type, auth_value):
         raise ValueError("Unsupported auth type. Use 'bearer' or 'basic'.")
 
 def highlight_body(body_str, content_type=None):
-    """
-    Print highlighted JSON or HTML, or fallback to plain text.
-    """
     if content_type and "application/json" in content_type:
         try:
             console.print_json(body_str)
@@ -186,50 +196,87 @@ def highlight_body(body_str, content_type=None):
         syntax = Syntax(body_str, "html", theme="monokai", line_numbers=False)
         console.print(syntax)
         return
-    # Try JSON anyway if not detected by content_type
     try:
         console.print_json(body_str)
         return
     except Exception:
         pass
-    # Fallback: plain text
     console.print(body_str, style="white")
 
 def highlight_headers(headers_dict):
-    """
-    Pretty-print headers as JSON using rich.
-    """
     try:
         console.print_json(json.dumps(headers_dict))
     except Exception:
         print(colored(json.dumps(headers_dict, indent=2), "white"))
 
 def print_response(status_code, reason, headers, body, content_type, only=None, console=console, elapsed=None, size=None):
+    from rich.align import Align
+
     if elapsed is not None and size is not None:
         console.print(f"[bold blue]Time:[/bold blue] {elapsed:.2f} ms  [bold blue]Size:[/bold blue] {format_size(size)}")
-    if only in (None, "status"):
-        status_color = "green" if 200 <= status_code < 300 else "cyan" if 300 <= status_code < 400 else "yellow" if 400 <= status_code < 500 else "red"
-        console.print(f"[bold {status_color}]Status: {status_code} {reason}[/bold {status_color}]")
-    if only in (None, "headers"):
-        table = Table(title="Headers:", show_header=True, header_style="bold magenta", show_lines=True, title_justify="left", title_style="bold magenta")
+    status_color = "green" if 200 <= status_code < 300 else "cyan" if 300 <= status_code < 400 else "yellow" if 400 <= status_code < 500 else "red"
+    status_panel = Panel(
+        Align.center(f"[bold blue]Time:[/bold blue] {elapsed:.2f} ms  [bold blue]Size:[/bold blue] {format_size(size)}  [bold {status_color}]Status code: {status_code} {reason}[/bold {status_color}]", vertical="middle"),
+        width=151,
+        border_style=status_color,
+        title="Status",
+        title_align="center",
+        expand=True,
+    )
+    if only is None:
+        table = Table(width=150, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
         table.add_column("Key", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
         for k, v in headers.items():
             table.add_row(str(k), str(v))
-        console.print(table)
-    if only in (None, "body"):
-        console.print("[bold yellow]Body:[/bold yellow]")
+        headers_panel = Panel(Align.center(table), width=151, title="Headers", border_style="magenta", expand=True)
+
         if content_type and "application/json" in content_type:
             try:
                 parsed = json.loads(body)
-                console.print_json(json.dumps(parsed, indent=2))
+                syntax = Syntax(json.dumps(parsed, indent=2), "json", theme="monokai", line_numbers=True, word_wrap=False)
             except Exception:
-                console.print(body, style="white")
+                syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
+            body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
         elif content_type and "html" in content_type:
-            syntax = Syntax(body, "html", theme="monokai", line_numbers=True)
-            console.print(syntax)
+            syntax = Syntax(body, "html", theme="monokai", line_numbers=True, word_wrap=True)
+            body_panel = Panel(syntax, title="Body (HTML)", border_style="yellow", expand=True)
         else:
-            console.print(body, style="white")
+            syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
+            body_panel = Panel(syntax, title="Body", border_style="yellow", expand=True)
+
+        console.print(status_panel)
+        console.print(Columns([headers_panel, body_panel]))
+    else:
+        if only == "headers":
+            table = Table(width=150, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
+            table.add_column("Key", style="cyan", no_wrap=True)
+            table.add_column("Value", style="white")
+            for k, v in headers.items():
+                table.add_row(str(k), str(v))
+                headers_panel = Panel(Align.center(table), width=151, title="Headers", border_style="magenta", expand=True)
+            console.print(headers_panel)
+        elif only == "body":
+            if content_type and "application/json" in content_type:
+                try:
+                    parsed = json.loads(body)
+                    syntax = Syntax(json.dumps(parsed, indent=2), "json", theme="monokai", line_numbers=True, word_wrap=False)
+                    body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
+                    console.print(body_panel)
+                except Exception:
+                    syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
+                    body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
+                    console.print(body_panel)
+            elif content_type and "html" in content_type:
+                syntax = Syntax(body, "html", theme="monokai", line_numbers=True, word_wrap=True)
+                body_panel = Panel(syntax, title="Body (HTML)", border_style="yellow", expand=True)
+                console.print(body_panel)
+            else:
+                syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
+                body_panel = Panel(syntax, title="Body", border_style="yellow", expand=True)
+                console.print(body_panel)
+        elif only == "status":
+            console.print(status_panel)
 
 def format_size(num):
     for unit in ['B','KB','MB','GB']:
@@ -238,7 +285,24 @@ def format_size(num):
         num /= 1024.0
     return f"{num:.2f} TB"
 
-def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, render=False):
+def fill_placeholders(obj, variables):
+    import re
+    def repl(match):
+        var = match.group(1)
+        if var not in variables:
+            value = input(colored(f"Enter value for variable '{var}': ", "yellow"))
+            variables[var] = value
+        return variables[var]
+    if isinstance(obj, str):
+        return re.sub(r"\{\{(\w+)\}\}", repl, obj)
+    elif isinstance(obj, dict):
+        return {k: fill_placeholders(v, variables) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [fill_placeholders(v, variables) for v in obj]
+    else:
+        return obj
+
+def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, render=False, fill_vars=False):
     method = method.upper()
     if headers is None:
         headers = {}
@@ -254,19 +318,14 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
 
     for single_url in urls:
         vars = load_variables()
-        url_to_use = single_url
-        headers_to_use = headers.copy()
-        data_to_use = data.copy() if isinstance(data, dict) else data
-        for k, v in vars.items():
-            url_to_use = url_to_use.replace(f"{{{{{k}}}}}", v)
-            if headers_to_use:
-                for hk in list(headers_to_use.keys()):
-                    if isinstance(headers_to_use[hk], str):
-                        headers_to_use[hk] = headers_to_use[hk].replace(f"{{{{{k}}}}}", v)
-            if isinstance(data_to_use, dict):
-                for dk in list(data_to_use.keys()):
-                    if isinstance(data_to_use[dk], str):
-                        data_to_use[dk] = data_to_use[dk].replace(f"{{{{{k}}}}}", v)
+        if fill_vars:
+            url_to_use = fill_placeholders(single_url, vars)
+            headers_to_use = fill_placeholders(headers.copy(), vars)
+            data_to_use = fill_placeholders(data.copy() if isinstance(data, dict) else data, vars) if data else data
+        else:
+            url_to_use = single_url
+            headers_to_use = headers.copy()
+            data_to_use = data.copy() if isinstance(data, dict) else data
 
         auth_headers = {}
         if auth:
@@ -286,17 +345,32 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
                 continue
 
         try:
-            start = time.time()
-            response = requests.request(method, url_to_use, headers=headers_to_use, json=data_to_use)
-            elapsed = (time.time() - start) * 1000  # ms
-            content_type = response.headers.get("Content-Type", "")
+            start = time()
+            resp = requests.request(method, url_to_use, headers=headers_to_use, json=data_to_use)
+            elapsed = (time() - start) * 1000
+            content_type = resp.headers.get("Content-Type", "")
             try:
-                body_str = json.dumps(response.json(), indent=2)
+                body_str = json.dumps(resp.json(), indent=2)
             except Exception:
-                body_str = response.text
-            resp_size = len(response.content)
-            print_response(response.status_code, response.reason, dict(response.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
-            # Save to history
+                body_str = resp.text
+            resp_size = len(resp.content)
+            print_response(resp.status_code, resp.reason, dict(resp.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
+            
+            if output_file:
+                try:
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        f.write(f"""Request Method: {method}
+Status: {resp.status_code} {resp.reason}
+============================
+Headers:
+{json.dumps(dict(resp.headers), indent=2)}
+============================
+Boydy:
+{body_str}""")
+                    print(colored(f"Response written to '{output_file}'", "green"))
+                except Exception as e:
+                    print(colored(f"Failed to write to output file '{output_file}': {e}", "red"))
+
             save_history({
                 "method": method,
                 "url": url_to_use,
@@ -304,20 +378,19 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
                 "data": data_to_use,
                 "output_file": output_file,
                 "only": only,
-                "status": response.status_code,
+                "status": resp.status_code,
                 "elapsed": elapsed,
                 "size": resp_size,
                 "date": datetime.now().isoformat()
             })
 
-            # Handle assertions
             if assertion:
                 if assertion.startswith("status="):
                     expected = int(assertion.split("=", 1)[1])
-                    if response.status_code == expected:
+                    if resp.status_code == expected:
                         print(colored(f"Assertion passed: status={expected}", "green"))
                     else:
-                        print(colored(f"Assertion failed: status={response.status_code} (expected {expected})", "red"))
+                        print(colored(f"Assertion failed: status={resp.status_code} (expected {expected})", "red"))
                 elif assertion.startswith("body_contains="):
                     expected = assertion.split("=", 1)[1]
                     if expected in body_str:
@@ -336,11 +409,6 @@ def print_request_preview(method, url, headers, data):
     print(colored(f"Data: {json.dumps(data, indent=2) if data else None}", "white"))
 
 def import_curl_command(curl_command, collection=None, alias=None):
-    """
-    Import a cURL command as a saved request (optionally into a collection).
-    """
-    import shlex
-    import re
     tokens = shlex.split(curl_command)
     if not tokens or tokens[0] != "curl":
         print(colored("Not a valid cURL command.", "red"))
@@ -392,9 +460,6 @@ def import_curl_command(curl_command, collection=None, alias=None):
         print(colored("Alias required for import.", "red"))
 
 def export_to_curl(req):
-    """
-    Export a saved request as a cURL command string.
-    """
     method = req.get("method", "GET")
     url = req.get("url", "")
     headers = req.get("headers", {})
@@ -505,18 +570,12 @@ def delete_collection_item(collection_name, alias):
         print(colored(f"Alias '{alias}' not found in collection '{collection_name}'.", "yellow"))
 
 def print_colored_diff(diff_lines):
-    """
-    Print unified diff lines with color:
-    - Insertions (starting with '+') in green
-    - Deletions (starting with '-') in red
-    - Context/info lines in default color
-    """
     for line in diff_lines:
         if line.startswith('+') and not line.startswith('+++'):
             print(colored(line, "green"))
         elif line.startswith('-') and not line.startswith('---'):
             print(colored(line, "red"))
-        elif re.match(r'^@@.*@@', line):
+        elif match(r'^@@.*@@', line):
             print(colored(line, "cyan", attrs=["bold"]))
         else:
             print(line)
@@ -541,7 +600,7 @@ def interactive_mode():
         print(colored("Cancelled.", "yellow"))
 
 def main():
-    ensure_data_files()  # <-- Ensure files/folders exist and are initialized
+    ensure_data_files()
     print_banner()
     collections = load_collections()
     while True:
@@ -728,6 +787,7 @@ def main():
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Override authentication for this request')
                 parser.add_argument('--assertion', help='[Optional] Assertion to validate response (e.g., status=200, body_contains=keyword)')
                 parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
+                parser.add_argument('-fv', '--fillvars', action='store_true', help='[Optional] Fill placeholders in the request (prompt for variables)')
                 # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
@@ -737,6 +797,7 @@ def main():
                     only = args.only
                     assertion = args.assertion
                     preview = args.preview
+                    fill_vars = args.fillvars
                     # REMOVED: render = args.render
                     auth_headers = {}
 
@@ -762,11 +823,6 @@ def main():
                                 f"Did you mean to specify a collection with -c <collection>?",
                                 "red", attrs=["bold"]))
                             continue
-                        # Fallback: search all collections (optional, can be removed if you want strict global/collection separation)
-                        # for coll, reqs in collections.items():
-                        #     if alias in reqs:
-                        #         req = reqs[alias]
-                        #         break
 
                     if not req:
                         print(colored(f"Alias '{alias}' not found in collection '{collection}'.", "red", attrs=["bold"]))
@@ -785,12 +841,14 @@ def main():
                             only,
                             assertion=assertion,
                             preview=preview,
-                            render=False  # Always False, feature removed
+                            render=False,  # Always False, feature removed
+                            fill_vars=fill_vars
                         )
                 except SystemExit:
                     continue
                 except Exception as e:
                     print(colored(f"Error: {e}", "red", attrs=["bold"]))
+
             elif cmd.startswith('request'):
                 parser = argparse.ArgumentParser(
                     prog='request',
@@ -805,6 +863,7 @@ def main():
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Authentication helper: bearer <token> or basic <user>:<pass>')
                 parser.add_argument('--assert', dest='assertion', help='[Optional] Assertion, e.g. status=200 or body_contains=foo')
                 parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
+                parser.add_argument('-fv', '--fillvars', action='store_true', help='[Optional] Fill placeholders in the request (prompt for variables)')
                 # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
@@ -835,6 +894,7 @@ def main():
                     assertion = args.assertion
                     auth_headers = {}
                     preview = args.preview
+                    fill_vars = args.fillvars
                     # REMOVED: render = args.render
                     if args.auth:
                         try:
@@ -844,7 +904,7 @@ def main():
                             print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                             return
                     headers.update(auth_headers)
-                    request(method, url, headers, data, output_file, only, assertion=assertion, preview=preview, render=False)
+                    request(method, url, headers, data, output_file, only, assertion=assertion, preview=preview, render=False, fill_vars=fill_vars)
                 except SystemExit:
                     continue
                 except Exception as e:
@@ -876,7 +936,7 @@ def main():
             elif cmd.startswith('replay'):
                 # Usage: replay <index>
                 parts = cmd.split()
-                if len(parts) == 2 and parts[1].isdigit():
+                if len(parts) == 2 and parts:
                     idx = int(parts[1])
                     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                         history = json.load(f)
@@ -1003,7 +1063,7 @@ def main():
                     if 0 <= idx1 < len(history) and 0 <= idx2 < len(history):
                         resp1 = history[idx1].get("body", "") if "body" in history[idx1] else json.dumps(history[idx1], indent=2)
                         resp2 = history[idx2].get("body", "") if "body" in history[idx2] else json.dumps(history[idx2], indent=2)
-                        diff = difflib.unified_diff(
+                        diff = unified_diff(
                             resp1.splitlines(), resp2.splitlines(),
                             fromfile=f"history[{idx1}]", tofile=f"history[{idx2}]",
                             lineterm=""
@@ -1017,7 +1077,7 @@ def main():
                         with open(args.first, "r", encoding="utf-8") as f1, open(args.second, "r", encoding="utf-8") as f2:
                             lines1 = f1.read().splitlines()
                             lines2 = f2.read().splitlines()
-                        diff = difflib.unified_diff(
+                        diff = unified_diff(
                             lines1, lines2,
                             fromfile=args.first, tofile=args.second,
                             lineterm=""
@@ -1060,13 +1120,17 @@ def main():
                 save_parser.add_argument('-u', '--url', required=True, help='Request URL')
                 save_parser.add_argument('-hd', '--headers', default="{}", help='Headers as JSON string')
                 save_parser.add_argument('-d', '--data', default="{}", help='Body as JSON string')
+                save_parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='Authentication helper: bearer <token> or basic <user>:<pass>')
+                save_parser.add_argument('--only', choices=['body', 'headers', 'status'], help='Output only this part of the response')
 
                 # List
                 list_parser = subparsers.add_parser('list', help='List all templates')
 
                 # Use
                 use_parser = subparsers.add_parser('use', help='Use a template')
-                use_parser.add_argument('-n', '--name', required=True, help='Template name')
+                use_parser.add_argument('name', help='Template name')
+                use_parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='Override authentication for this request')
+                use_parser.add_argument('--only', choices=['body', 'headers', 'status'], help='Output only this part of the response')
 
                 # Delete
                 delete_parser = subparsers.add_parser('delete', help='Delete a template')
@@ -1077,11 +1141,48 @@ def main():
                     if args.subcmd == 'save':
                         headers = json.loads(args.headers)
                         data = json.loads(args.data)
-                        template_save(args.name, args.method, args.url, headers, data)
+                        tpl = {
+                            "method": args.method,
+                            "url": args.url,
+                            "headers": headers,
+                            "data": data
+                        }
+                        if args.auth:
+                            tpl["auth"] = args.auth
+                        if args.only:
+                            tpl["only"] = args.only
+                        # Add more fields as needed
+                        templates = load_templates()
+                        templates[args.name] = tpl
+                        save_templates(templates)
+                        print(colored(f"Template '{args.name}' saved.", "green"))
                     elif args.subcmd == 'list':
                         template_list()
                     elif args.subcmd == 'use':
-                        template_use(args.name)
+                        templates = load_templates()
+                        tpl = templates.get(args.name)
+                        if not tpl:
+                            print(colored(f"Template '{args.name}' not found.", "yellow"))
+                            return
+                        # Allow override of auth/only
+                        method = tpl.get('method')
+                        url = tpl.get('url')
+                        headers = tpl.get('headers', {})
+                        data = tpl.get('data', {})
+                        auth = args.auth if args.auth else tpl.get('auth')
+                        only = args.only if args.only else tpl.get('only')
+                        print_request_preview(method, url, headers, data)
+                        if input("Send this request? (y/N): ").lower() == "y":
+                            request(
+                                method,
+                                url,
+                                headers,
+                                data,
+                                only=only,
+                                auth=auth
+                            )
+                        else:
+                            print(colored("Cancelled.", "yellow"))
                     elif args.subcmd == 'delete':
                         templates = load_templates()
                         if args.name in templates:
@@ -1129,6 +1230,104 @@ def main():
                 interactive_mode()
             else:
                 print(colored("Invalid command. Type 'help' for a list of commands.", "red", attrs=["bold"]))
+
+def template_save(name, method, url, headers, data):
+    templates = load_templates()
+    templates[name] = {
+        "method": method,
+        "url": url,
+        "headers": headers,
+        "data": data
+    }
+    save_templates(templates)
+    print(colored(f"Template '{name}' saved.", "green"))
+
+def template_list():
+    templates = load_templates()
+    if not templates:
+        print(colored("No templates saved.", "yellow"))
+        return
+    print(colored("Templates:", "magenta", attrs=["bold"]))
+    for name, tpl in templates.items():
+        print(colored(f"  Name: {name}", "cyan"))
+        print(colored(f"    Method: {tpl['method']}", "green"))
+        print(colored(f"    URL: {tpl['url']}", "yellow"))
+        print(colored(f"    Headers: {json.dumps(tpl.get('headers', {}))}", "white"))
+        print(colored(f"    Data: {json.dumps(tpl.get('data', {}))}", "white"))
+
+def template_use(name):
+    templates = load_templates()
+    tpl = templates.get(name)
+    if not tpl:
+        print(colored(f"Template '{name}' not found.", "yellow"))
+        return
+    print_request_preview(tpl['method'], tpl['url'], tpl.get('headers', {}), tpl.get('data', {}))
+    if input("Send this request? (y/N): ").lower() == "y":
+        request(
+            tpl['method'],
+            tpl['url'],
+            tpl.get('headers', {}),
+            tpl.get('data', {}),
+            fill_vars=True
+        )
+    else:
+        print(colored("Cancelled.", "yellow"))
+
+def export_data(target, filename):
+    data = {}
+    if target == "all":
+        data = {
+            "collections": load_collections(),
+            "aliases": load_global_aliases(),
+            "variables": load_variables(),
+            "templates": load_templates()
+        }
+    elif target == "collections":
+        data = load_collections()
+    elif target == "aliases":
+        data = load_global_aliases()
+    elif target == "variables":
+        data = load_variables()
+    elif target == "templates":
+        data = load_templates()
+    else:
+        print(colored(f"Unknown export target: {target}", "red"))
+        return
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    print(colored(f"Exported {target} to {filename}", "green"))
+
+def import_data(filename):
+    if not os.path.exists(filename):
+        print(colored(f"File '{filename}' not found.", "red"))
+        return
+    with open(filename, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict) and any(k in data for k in ("collections", "aliases", "variables", "templates")):
+        if "collections" in data:
+            save_collections(data["collections"])
+        if "aliases" in data:
+            save_global_aliases(data["aliases"])
+        if "variables" in data:
+            save_variables(data["variables"])
+        if "templates" in data:
+            save_templates(data["templates"])
+        print(colored(f"Imported all data from {filename}", "green"))
+    else:
+        if isinstance(data, dict) and all(isinstance(v, dict) for v in data.values()):
+            if all("method" in v and "url" in v for v in data.values()):
+                save_global_aliases(data)
+                print(colored(f"Imported aliases from {filename}", "green"))
+            else:
+                save_collections(data)
+                print(colored(f"Imported collections from {filename}", "green"))
+        elif isinstance(data, dict):
+            save_variables(data)
+            print(colored(f"Imported variables from {filename}", "green"))
+        elif isinstance(data, list):
+            print(colored("Importing lists is not supported.", "red"))
+        else:
+            print(colored("Unknown data format for import.", "red"))
 
 if __name__ == "__main__":
     main()

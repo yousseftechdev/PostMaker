@@ -1,1 +1,22 @@
-{}
+{
+  "get": {
+    "method": "get",
+    "url": "{{url}}",
+    "headers": {},
+    "data": {}
+  },
+  "getstat": {
+    "method": "get",
+    "url": "{{url}}",
+    "headers": {},
+    "data": {},
+    "only": "status"
+  },
+  "getstat2": {
+    "method": "get",
+    "url": "{{exampleurl}}",
+    "headers": {},
+    "data": {},
+    "only": "status"
+  }
+}

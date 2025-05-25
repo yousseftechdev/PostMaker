@@ -1,43 +1,42 @@
 # PostMaker
 
-**PostMaker** is a simple, terminal-based (TUI) API client inspired by Postman, designed for developers who prefer the command line. It allows you to send HTTP requests, manage collections of requests, use variables, view and replay history, assert responses, chain requests, diff responses, use templates, run scripts, import/export data, and more—all from your terminal.
+**PostMaker** is a terminal-based API client inspired by Postman, for developers who prefer the command line. It supports sending HTTP requests, managing collections, variables, history, assertions, chaining, diffing, templates, import/export, and more.
 
 ---
 
 ## Features
 
-- **Send HTTP requests** (GET, POST, PUT, DELETE, etc.)
-- **Save requests** to named collections or as global aliases for reuse
-- **Send saved requests** by alias (from collections or global aliases)
-- **Use variables** in URLs, headers, and bodies
-- **View and replay request history**
-- **Pretty-print and syntax highlight** JSON and HTML responses and headers
-- **Assertions** for status codes and response content
-- **Chain requests** from a file
-- **Diff responses** from history or files
-- **Manage collections, global aliases, and variables** (add, remove, clear)
-- **Import/export requests as cURL commands**
-- **Authentication helpers** (Bearer, Basic)
-- **Output responses to files** (with auto-naming for batch requests)
-- **Robust CLI with helpful error handling**
-- **Templates**: Save and reuse request templates with placeholders
-- **Import/export all data** (collections, aliases, variables, templates)
-- **View and manage templates**
-- **Interactive request builder**
-- **View global aliases**
-- **Cat files** (view file contents in terminal)
+- Send HTTP requests (GET, POST, PUT, DELETE, etc.)
+- Save requests to collections or as global aliases
+- Send saved requests by alias (from collections or global aliases)
+- Use variables in URLs, headers, and bodies
+- View and replay request history
+- Pretty-print and syntax highlight JSON and HTML responses and headers
+- Assertions for status codes and response content
+- Chain requests from a file
+- Diff responses from history or files
+- Manage collections, global aliases, and variables (add, remove, clear)
+- Import/export requests as cURL commands
+- Authentication helpers (Bearer, Basic)
+- Output responses to files (with auto-naming for batch requests)
+- Templates: Save and reuse request templates with placeholders
+- Import/export all data (collections, aliases, variables, templates)
+- View and manage templates
+- Interactive request builder
+- View global aliases
+- Cat files (view file contents in terminal)
 
 ---
 
 ## Getting Started
 
-### 1. **Install Requirements**
+### 1. Install Requirements
 
 ```sh
 pip install requests termcolor rich
 ```
 
-### 2. **Run PostMaker**
+### 2. Run PostMaker
 
 ```sh
 python main.py
@@ -81,9 +80,9 @@ Type `help` in the program for a summary of all commands.
 request -m GET -u https://jsonplaceholder.typicode.com/posts/1
 ```
 
-**Options:**
-- `-m, --method` (**required**) — HTTP method (GET, POST, etc.)
-- `-u, --url` (**required**) — Request URL (can be a file with URLs)
+Options:
+- `-m, --method` (required) — HTTP method
+- `-u, --url` (required) — Request URL (can be a file with URLs)
 - `-hd, --headers` — Headers as JSON string or `@file.json`
 - `-d, --data` — Body as JSON string or `@file.json`
 - `-o, --output` — Output response to file
@@ -91,125 +90,102 @@ request -m GET -u https://jsonplaceholder.typicode.com/posts/1
 - `--auth` — Authentication helper: `"bearer TOKEN"` or `"basic USER:PASS"`
 - `--assert` — Assertion, e.g. `status=200` or `body_contains=foo`
 - `-p, --preview` — Preview request before sending
+- `-fv, --fillvars` — Fill placeholders in the request (prompt for variables)
 
-**Examples:**
+Examples:
 ```sh
 request -m POST -u https://api.example.com/data -hd '{"Authorization": "Bearer token"}' -d '{"key": "value"}'
-request -m GET -u urls.txt  # Send to all URLs in file
+request -m GET -u urls.txt
 request -m GET -u https://api.example.com/data --auth "bearer mytoken"
 request -m GET -u https://api.example.com/data --auth "basic user:pass"
 request -m GET -u https://api.example.com/data --assert status=200
 request -m GET -u https://api.example.com/data --only body
 request -m GET -u https://api.example.com/data -p
+request -m GET -u "https://api.example.com/{{endpoint}}" -fv
 ```
 
 ---
 
 ### Using Variables
 
-Variables let you reuse values (like base URLs, tokens, etc.) in your requests.
-
-#### Set a Variable
-
+Set a variable:
 ```sh
 setvar base_url https://jsonplaceholder.typicode.com
 ```
 
-#### View Variables
-
+View variables:
 ```sh
 vars
 ```
 
-#### Use Variables in Requests
-
-Use double curly braces in URLs, headers, or data:
-
+Use variables in requests:
 ```sh
 request -m GET -u "{{base_url}}/posts/1"
 ```
 
-#### Use Variables in Saved Requests
-
+Remove or clear variables:
 ```sh
-save -c demo -a getpost -m GET -u "{{base_url}}/posts/1"
-send -a getpost -c demo
-```
-
-#### Remove or Clear Variables
-
-```sh
-vars -rm base_url      # Remove a variable
-vars -cl               # Clear all variables
+vars -rm base_url
+vars -cl
 ```
 
 ---
 
 ### Collections and Global Aliases
 
-#### Save a Request to a Collection
-
+Save a request to a collection:
 ```sh
 save -c mycollection -a myalias -m GET -u https://api.example.com/data
 ```
 
-#### Save a Request as a Global Alias
-
-If you omit `-c`, the alias is saved globally and can be used from anywhere:
-
+Save as a global alias:
 ```sh
 save -a myalias -m GET -u https://api.example.com/data
 ```
 
-#### List Collections
-
+List collections:
 ```sh
 collections
 ```
 
-#### View a Collection
-
+View a collection:
 ```sh
 collections -c mycollection
 ```
 
-#### View a Specific Request
-
+View a specific request:
 ```sh
 collections -c mycollection -a myalias
 ```
 
-#### Delete a Collection or Alias
-
+Delete a collection or alias:
 ```sh
 collections -del mycollection
 collections -del mycollection:myalias
 collections -rm mycollection:myalias
 ```
 
-#### Remove a Global Alias
-
+Remove a global alias:
 ```sh
 removeglobal myalias
 ```
 
-#### Using Global Aliases
-
-You can use `send -a myalias` to send a request saved as a global alias. If not found, `send` will search all collections for the alias.
+Send a global alias:
+```sh
+send -a myalias
+```
 
 ---
 
 ### Import/Export cURL
 
-#### Import a cURL Command
-
+Import a cURL command:
 ```sh
 importcurl "curl -X POST https://api.example.com/data -H 'Authorization: Bearer token' -d '{\"key\": \"value\"}'" -a myalias
 importcurl "curl https://api.example.com/data" -a myalias -c mycollection
 ```
 
-#### Export a Saved Request as cURL
-
+Export a saved request as cURL:
 ```sh
 exportcurl -a myalias
 exportcurl -a myalias -c mycollection
@@ -219,22 +195,19 @@ exportcurl -a myalias -c mycollection
 
 ### History
 
-#### View History
-
+View history:
 ```sh
 history
-history -n 5         # Show last 5 entries
-history -s posts     # Search by URL or method
+history -n 5
+history -s posts
 ```
 
-#### Replay a Request
-
+Replay a request:
 ```sh
 replay 0
 ```
 
-#### Clear History
-
+Clear history:
 ```sh
 history -cl
 ```
@@ -262,7 +235,6 @@ chain chain.json
 ### Assertions
 
 Add assertions to requests:
-
 ```sh
 request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert status=200
 request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert body_contains=title
@@ -274,7 +246,6 @@ send -a myalias --assert status=200
 ### Diff Responses
 
 Compare two responses from history or files:
-
 ```sh
 diff 0 1
 diff response1.txt response2.txt
@@ -284,8 +255,7 @@ diff response1.txt response2.txt
 
 ### Authentication Helpers
 
-Add authentication easily:
-
+Add authentication:
 ```sh
 request -m GET -u https://api.example.com/data --auth "bearer mytoken"
 request -m GET -u https://api.example.com/data --auth "basic user:pass"
@@ -295,9 +265,9 @@ request -m GET -u https://api.example.com/data --auth "basic user:pass"
 
 ### Output and Highlighting
 
-- **All JSON and HTML responses and headers are syntax highlighted** using [rich](https://rich.readthedocs.io/).
-- **Output to file:** Use `-o output.txt` to save the response (auto-numbered for batch requests).
-- **Use `--only`** to print only the body, headers, or status.
+- All JSON and HTML responses and headers are syntax highlighted.
+- Output to file: Use `-o output.txt` to save the response.
+- Use `--only` to print only the body, headers, or status.
 
 ---
 
@@ -305,27 +275,23 @@ request -m GET -u https://api.example.com/data --auth "basic user:pass"
 
 Templates let you save and reuse request blueprints with placeholders.
 
-#### Save a Template
-
+Save a template:
 ```sh
 template save -n mytemplate -m POST -u "https://api.example.com/{{endpoint}}" -hd '{"Authorization":"Bearer {{token}}"}' -d '{"key":"{{value}}"}'
 ```
 
-#### List Templates
-
+List templates:
 ```sh
 template list
 ```
 
-#### Use a Template
-
+Use a template:
 ```sh
-template use -n mytemplate
+template use mytemplate
 # You will be prompted for each placeholder value.
 ```
 
-#### Delete a Template
-
+Delete a template:
 ```sh
 template delete -n mytemplate
 ```
@@ -335,7 +301,6 @@ template delete -n mytemplate
 ### Import/Export Data
 
 Export or import all data (collections, aliases, variables, templates):
-
 ```sh
 export -t all -f backup.json
 export -t collections -f collections.json
@@ -348,7 +313,6 @@ import -f backup.json
 ### Interactive Request Builder
 
 Build and send a request interactively:
-
 ```sh
 interactive
 ```
@@ -366,7 +330,6 @@ globalaliases
 ### Cat Files
 
 View the contents of a file:
-
 ```sh
 cat filename.txt
 ```
@@ -392,7 +355,7 @@ vars -cl
 importcurl "curl -X POST https://api.example.com/data -H 'Authorization: Bearer token' -d '{\"key\": \"value\"}'" -a myalias
 exportcurl -a myalias
 template save -n t1 -m GET -u "{{base_url}}/posts/{{id}}"
-template use -n t1
+template use t1
 export -t all -f backup.json
 import -f backup.json
 ```
