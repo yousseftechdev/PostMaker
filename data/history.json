@@ -888,5 +888,17 @@
     "elapsed": 1000.2851486206055,
     "size": 1256,
     "date": "2025-05-25T07:09:32.698882"
+  },
+  {
+    "method": "GET",
+    "url": "https://example.com",
+    "headers": {},
+    "data": null,
+    "output_file": null,
+    "only": null,
+    "status": 200,
+    "elapsed": 1261.9822025299072,
+    "size": 1256,
+    "date": "2025-05-26T01:34:56.054894"
   }
 ]

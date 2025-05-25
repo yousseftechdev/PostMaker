@@ -285,46 +285,66 @@ def format_size(num):
         num /= 1024.0
     return f"{num:.2f} TB"
 
-def fill_placeholders(obj, variables):
+def fill_placeholders(obj, variables, prompt_for_missing=False):
     def repl(match):
         var = match.group(1)
         if var not in variables:
-            value = input(colored(f"Enter value for variable '{var}': ", "yellow"))
-            variables[var] = value
+            if prompt_for_missing:
+                value = input(colored(f"Enter value for variable '{var}': ", "yellow"))
+                variables[var] = value
+            else:
+                raise KeyError(f"Variable '{var}' not found in saved variables.")
         return variables[var]
     if isinstance(obj, str):
         return sub(r"\{\{(\w+)\}\}", repl, obj)
     elif isinstance(obj, dict):
-        return {k: fill_placeholders(v, variables) for k, v in obj.items()}
+        return {k: fill_placeholders(v, variables, prompt_for_missing) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [fill_placeholders(v, variables) for v in obj]
+        return [fill_placeholders(v, variables, prompt_for_missing) for v in obj]
     else:
         return obj
 
 def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, render=False, fill_vars=False):
-    method = method.upper()
-    if headers is None:
-        headers = {}
-    if data == {}:
-        data = None
+    vars = load_variables()
+    # Always fill placeholders in method, url, headers, and data
+    try:
+        if fill_vars:
+            method_to_use = fill_placeholders(method, vars, prompt_for_missing=True)
+            url_to_use = fill_placeholders(url, vars, prompt_for_missing=True)
+            headers_to_use = fill_placeholders(headers.copy() if headers else {}, vars, prompt_for_missing=True)
+            data_to_use = fill_placeholders(data.copy() if isinstance(data, dict) else data, vars, prompt_for_missing=True) if data else data
+        else:
+            method_to_use = fill_placeholders(method, vars, prompt_for_missing=False)
+            url_to_use = fill_placeholders(url, vars, prompt_for_missing=False)
+            headers_to_use = fill_placeholders(headers.copy() if headers else {}, vars, prompt_for_missing=False)
+            data_to_use = fill_placeholders(data.copy() if isinstance(data, dict) else data, vars, prompt_for_missing=False) if data else data
+    except KeyError as e:
+        print(colored(f"Error: {e}", "red", attrs=["bold"]))
+        return
+
+    method_to_use = method_to_use.upper()
+    if headers_to_use is None:
+        headers_to_use = {}
+    if data_to_use == {}:
+        data_to_use = None
 
     urls = []
-    if isinstance(url, str) and os.path.isfile(url):
-        with open(url, "r", encoding="utf-8") as f:
+    if isinstance(url_to_use, str) and os.path.isfile(url_to_use):
+        with open(url_to_use, "r", encoding="utf-8") as f:
             urls = [line.strip() for line in f if line.strip()]
     else:
-        urls = [url.strip()]
+        urls = [url_to_use.strip()]
 
     for single_url in urls:
-        vars = load_variables()
-        if fill_vars:
-            url_to_use = fill_placeholders(single_url, vars)
-            headers_to_use = fill_placeholders(headers.copy(), vars)
-            data_to_use = fill_placeholders(data.copy() if isinstance(data, dict) else data, vars) if data else data
-        else:
-            url_to_use = single_url
-            headers_to_use = headers.copy()
-            data_to_use = data.copy() if isinstance(data, dict) else data
+        try:
+            # Fill placeholders in each URL if needed
+            if fill_vars:
+                single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=True)
+            else:
+                single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=False)
+        except KeyError as e:
+            print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            return
 
         auth_headers = {}
         if auth:
@@ -334,10 +354,11 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
             except Exception as e:
                 print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                 continue
-        headers_to_use.update(auth_headers)
+        headers_to_send = headers_to_use.copy()
+        headers_to_send.update(auth_headers)
 
         if preview:
-            print_request_preview(method, url_to_use, headers_to_use, data_to_use)
+            print_request_preview(method_to_use, single_url_filled, headers_to_send, data_to_use)
             confirm = input(colored("Send this request? (y/N): ", "yellow"))
             if confirm.lower() != "y":
                 print(colored("Cancelled.", "yellow"))
@@ -345,7 +366,7 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
 
         try:
             start = time()
-            resp = requests.request(method, url_to_use, headers=headers_to_use, json=data_to_use)
+            resp = requests.request(method_to_use, single_url_filled, headers=headers_to_send, json=data_to_use)
             elapsed = (time() - start) * 1000
             content_type = resp.headers.get("Content-Type", "")
             try:
@@ -354,11 +375,11 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
                 body_str = resp.text
             resp_size = len(resp.content)
             print_response(resp.status_code, resp.reason, dict(resp.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
-            
+
             if output_file:
                 try:
                     with open(output_file, "w", encoding="utf-8") as f:
-                        f.write(f"""Request Method: {method}
+                        f.write(f"""Request Method: {method_to_use}
 Status: {resp.status_code} {resp.reason}
 ============================
 Headers:
@@ -371,9 +392,9 @@ Boydy:
                     print(colored(f"Failed to write to output file '{output_file}': {e}", "red"))
 
             save_history({
-                "method": method,
-                "url": url_to_use,
-                "headers": headers_to_use,
+                "method": method_to_use,
+                "url": single_url_filled,
+                "headers": headers_to_send,
                 "data": data_to_use,
                 "output_file": output_file,
                 "only": only,
