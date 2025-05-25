@@ -4,9 +4,10 @@ import shlex
 import argparse
 import os
 import requests
+from base64 import b64encode
 from difflib import unified_diff
 from time import time
-from re import match
+from re import sub, match
 from termcolor import colored
 from rich.syntax import Syntax
 from rich.console import Console
@@ -15,6 +16,7 @@ from datetime import datetime
 from rich.markdown import Markdown
 from rich.columns import Columns
 from rich.panel import Panel
+from rich.align import Align
 
 console = Console()
 
@@ -176,11 +178,10 @@ def parse_auth(auth_type, auth_value):
     if auth_type == "bearer":
         return {"Authorization": f"Bearer {auth_value}"}
     elif auth_type == "basic":
-        import base64
         if ':' not in auth_value:
             raise ValueError("Basic auth value must be in the form username:password")
         user, pwd = auth_value.split(':', 1)
-        token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+        token = b64encode(f"{user}:{pwd}".encode()).decode()
         return {"Authorization": f"Basic {token}"}
     else:
         raise ValueError("Unsupported auth type. Use 'bearer' or 'basic'.")
@@ -210,7 +211,6 @@ def highlight_headers(headers_dict):
         print(colored(json.dumps(headers_dict, indent=2), "white"))
 
 def print_response(status_code, reason, headers, body, content_type, only=None, console=console, elapsed=None, size=None):
-    from rich.align import Align
 
     if elapsed is not None and size is not None:
         console.print(f"[bold blue]Time:[/bold blue] {elapsed:.2f} ms  [bold blue]Size:[/bold blue] {format_size(size)}")
@@ -286,7 +286,6 @@ def format_size(num):
     return f"{num:.2f} TB"
 
 def fill_placeholders(obj, variables):
-    import re
     def repl(match):
         var = match.group(1)
         if var not in variables:
@@ -294,7 +293,7 @@ def fill_placeholders(obj, variables):
             variables[var] = value
         return variables[var]
     if isinstance(obj, str):
-        return re.sub(r"\{\{(\w+)\}\}", repl, obj)
+        return sub(r"\{\{(\w+)\}\}", repl, obj)
     elif isinstance(obj, dict):
         return {k: fill_placeholders(v, variables) for k, v in obj.items()}
     elif isinstance(obj, list):
