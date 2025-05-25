@@ -12,7 +12,7 @@
 - Use variables in URLs, headers, and bodies
 - View and replay request history
 - Pretty-print and syntax highlight JSON and HTML responses and headers
-- Assertions for status codes and response content
+- Assertions for status codes and response content, with optional script execution
 - Chain requests from a file
 - Diff responses from history or files
 - Manage collections, global aliases, and variables (add, remove, clear)
@@ -25,6 +25,7 @@
 - Interactive request builder
 - View global aliases
 - Cat files (view file contents in terminal)
+- Script runner: Run custom Python scripts after assertions pass (edit scripts in `scripts/` directory)
 
 ---
 
@@ -80,19 +81,49 @@ Type `help` in the program for a summary of all commands.
 request -m GET -u https://jsonplaceholder.typicode.com/posts/1
 ```
 
-Options:
-- `-m, --method` (required) — HTTP method
-- `-u, --url` (required) — Request URL (can be a file with URLs)
-- `-hd, --headers` — Headers as JSON string or `@file.json`
-- `-d, --data` — Body as JSON string or `@file.json`
-- `-o, --output` — Output response to file
-- `--only` — Output only `body`, `headers`, or `status`
-- `--auth` — Authentication helper: `"bearer TOKEN"` or `"basic USER:PASS"`
-- `--assert` — Assertion, e.g. `status=200` or `body_contains=foo`
-- `-p, --preview` — Preview request before sending
-- `-fv, --fillvars` — Fill placeholders in the request (prompt for variables)
+**Options and Expected Output:**
 
-Examples:
+- `-m, --method` (required) — HTTP method  
+  *Example:* `-m POST`  
+  *Expected output:* Sends a POST request.
+
+- `-u, --url` (required) — Request URL (can be a file with URLs)  
+  *Example:* `-u https://api.example.com/data`  
+  *Expected output:* Sends request to the specified URL.
+
+- `-hd, --headers` — Headers as JSON string or `@file.json`  
+  *Example:* `-hd '{"Authorization": "Bearer token"}'`  
+  *Expected output:* Adds headers to the request.
+
+- `-d, --data` — Body as JSON string or `@file.json`  
+  *Example:* `-d '{"key": "value"}'`  
+  *Expected output:* Sends JSON body.
+
+- `-o, --output` — Output response to file  
+  *Example:* `-o output.txt`  
+  *Expected output:* Writes the response to `output.txt`.
+
+- `--only` — Output only `body`, `headers`, or `status`  
+  *Example:* `--only body`  
+  *Expected output:* Prints only the response body.
+
+- `--auth` — Authentication helper: `"bearer TOKEN"` or `"basic USER:PASS"`  
+  *Example:* `--auth "bearer mytoken"`  
+  *Expected output:* Adds Authorization header.
+
+- `--assert` — Assertion, e.g. `status=200` or `body_contains=foo`  
+  *Example:* `--assert status=200`  
+  *Expected output:* Prints assertion result after request.
+
+- `-p, --preview` — Preview request before sending  
+  *Example:* `-p`  
+  *Expected output:* Shows request details and asks for confirmation.
+
+- `-fv, --fillvars` — Fill placeholders in the request (prompt for variables)  
+  *Example:* `-fv`  
+  *Expected output:* Prompts for variable values used in the request.
+
+**Examples:**
 ```sh
 request -m POST -u https://api.example.com/data -hd '{"Authorization": "Bearer token"}' -d '{"key": "value"}'
 request -m GET -u urls.txt
@@ -106,17 +137,57 @@ request -m GET -u "https://api.example.com/{{endpoint}}" -fv
 
 ---
 
+### Assertions and Script Runner
+
+You can add assertions to requests to automatically check the response.  
+**Supported assertions:**
+- `status=CODE` — Check if the response status code matches.
+- `body_contains=STRING` — Check if the response body contains a substring.
+
+**You can also run a custom script if the assertion passes.**  
+Scripts are located in the `scripts/` directory (e.g., `scripts/1.py` to `scripts/5.py`).  
+You can edit these scripts to perform any custom action.
+
+**Syntax:**
+```sh
+request -m GET -u https://api.example.com/data --assert status=200,1
+```
+- The number after the comma specifies which script to run (1-5).
+- **Important:** There must be **no space** between the assertion condition and the comma/script number.  
+  For example: `--assert status=200,1` is correct, but `--assert status=200, 1` will not work.
+
+**Expected output:**
+- If the assertion passes:  
+  `Assertion passed: status=200`  
+  Then, the specified script (e.g., `scripts/1.py`) will be executed.
+- If the assertion fails:  
+  `Assertion failed: status=404 (expected 200)`
+
+**You can edit the scripts in the `scripts/` directory to customize what happens when an assertion passes.**
+
+**Examples:**
+```sh
+request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert status=200,1
+request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert body_contains=title,2
+```
+
+---
+
 ### Using Variables
 
 Set a variable:
 ```sh
 setvar base_url https://jsonplaceholder.typicode.com
 ```
+*Expected output:*  
+`Variable 'base_url' set.`
 
 View variables:
 ```sh
 vars
 ```
+*Expected output:*  
+A JSON object of all variables.
 
 Use variables in requests:
 ```sh
@@ -128,6 +199,8 @@ Remove or clear variables:
 vars -rm base_url
 vars -cl
 ```
+*Expected output:*  
+Confirmation prompt and removal/clearing of variables.
 
 ---
 
@@ -137,26 +210,36 @@ Save a request to a collection:
 ```sh
 save -c mycollection -a myalias -m GET -u https://api.example.com/data
 ```
+*Expected output:*  
+`Request saved as 'myalias' in collection 'mycollection'.`
 
 Save as a global alias:
 ```sh
 save -a myalias -m GET -u https://api.example.com/data
 ```
+*Expected output:*  
+`Request saved as global alias 'myalias'.`
 
 List collections:
 ```sh
 collections
 ```
+*Expected output:*  
+Lists all collections and their aliases.
 
 View a collection:
 ```sh
 collections -c mycollection
 ```
+*Expected output:*  
+Lists all requests in the specified collection.
 
 View a specific request:
 ```sh
 collections -c mycollection -a myalias
 ```
+*Expected output:*  
+Shows details for the specified alias.
 
 Delete a collection or alias:
 ```sh
@@ -164,16 +247,22 @@ collections -del mycollection
 collections -del mycollection:myalias
 collections -rm mycollection:myalias
 ```
+*Expected output:*  
+Confirmation prompt and deletion.
 
 Remove a global alias:
 ```sh
 removeglobal myalias
 ```
+*Expected output:*  
+Confirmation prompt and removal.
 
 Send a global alias:
 ```sh
 send -a myalias
 ```
+*Expected output:*  
+Sends the saved request.
 
 ---
 
@@ -184,12 +273,16 @@ Import a cURL command:
 importcurl "curl -X POST https://api.example.com/data -H 'Authorization: Bearer token' -d '{\"key\": \"value\"}'" -a myalias
 importcurl "curl https://api.example.com/data" -a myalias -c mycollection
 ```
+*Expected output:*  
+Confirmation of import.
 
 Export a saved request as cURL:
 ```sh
 exportcurl -a myalias
 exportcurl -a myalias -c mycollection
 ```
+*Expected output:*  
+A cURL command string.
 
 ---
 
@@ -201,16 +294,22 @@ history
 history -n 5
 history -s posts
 ```
+*Expected output:*  
+List of recent requests.
 
 Replay a request:
 ```sh
 replay 0
 ```
+*Expected output:*  
+Re-sends the request at index 0 in history.
 
 Clear history:
 ```sh
 history -cl
 ```
+*Expected output:*  
+Confirmation prompt and clearing of history.
 
 ---
 
@@ -229,17 +328,8 @@ Run a sequence of requests from a JSON file:
 ```sh
 chain chain.json
 ```
-
----
-
-### Assertions
-
-Add assertions to requests:
-```sh
-request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert status=200
-request -m GET -u https://jsonplaceholder.typicode.com/posts/1 --assert body_contains=title
-send -a myalias --assert status=200
-```
+*Expected output:*  
+Runs each request in sequence.
 
 ---
 
@@ -250,6 +340,8 @@ Compare two responses from history or files:
 diff 0 1
 diff response1.txt response2.txt
 ```
+*Expected output:*  
+Colored diff output in the terminal.
 
 ---
 
@@ -260,6 +352,8 @@ Add authentication:
 request -m GET -u https://api.example.com/data --auth "bearer mytoken"
 request -m GET -u https://api.example.com/data --auth "basic user:pass"
 ```
+*Expected output:*  
+Adds the appropriate Authorization header.
 
 ---
 
@@ -279,22 +373,30 @@ Save a template:
 ```sh
 template save -n mytemplate -m POST -u "https://api.example.com/{{endpoint}}" -hd '{"Authorization":"Bearer {{token}}"}' -d '{"key":"{{value}}"}'
 ```
+*Expected output:*  
+`Template 'mytemplate' saved.`
 
 List templates:
 ```sh
 template list
 ```
+*Expected output:*  
+Lists all templates.
 
 Use a template:
 ```sh
 template use mytemplate
 # You will be prompted for each placeholder value.
 ```
+*Expected output:*  
+Prompts for variable values and sends the request.
 
 Delete a template:
 ```sh
 template delete -n mytemplate
 ```
+*Expected output:*  
+Confirmation prompt and deletion.
 
 ---
 
@@ -307,6 +409,8 @@ export -t collections -f collections.json
 export -t aliases -f aliases.json
 import -f backup.json
 ```
+*Expected output:*  
+Confirmation of export/import.
 
 ---
 
@@ -316,6 +420,8 @@ Build and send a request interactively:
 ```sh
 interactive
 ```
+*Expected output:*  
+Guided prompts for method, URL, headers, and body.
 
 ---
 
@@ -324,6 +430,8 @@ interactive
 ```sh
 globalaliases
 ```
+*Expected output:*  
+Lists all global aliases.
 
 ---
 
@@ -333,6 +441,8 @@ View the contents of a file:
 ```sh
 cat filename.txt
 ```
+*Expected output:*  
+Prints the file contents.
 
 ---
 
@@ -383,6 +493,7 @@ python testAPI.py
 - Use templates for requests with placeholders.
 - Use the script runner for automation or advanced workflows.
 - Use `interactive` for guided request building.
+- **Edit scripts in the `scripts/` directory to customize what happens after assertions pass.**
 
 ---
 
