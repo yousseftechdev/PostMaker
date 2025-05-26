@@ -17,6 +17,8 @@ from rich.markdown import Markdown
 from rich.columns import Columns
 from rich.panel import Panel
 from rich.align import Align
+import random
+import time as pytime
 
 console = Console()
 
@@ -31,6 +33,15 @@ VARIABLES_FILE = rel_path("data/variables.json")
 GLOBAL_ALIASES_FILE = rel_path("data/global_aliases.json")
 TEMPLATES_FILE = rel_path("data/templates.json")
 SCRIPTS_DIR = rel_path("scripts")
+DEBUG_MODE = False
+
+def set_debug_mode(enabled):
+    global DEBUG_MODE
+    DEBUG_MODE = enabled
+    if DEBUG_MODE:
+        print(colored("Debug mode is ON", "red", attrs=["bold"]))
+    else:
+        print(colored("Debug mode is OFF", "green", attrs=["bold"]))
 
 def ensure_data_files():
     data_files = [
@@ -226,19 +237,19 @@ def print_response(status_code, reason, headers, body, content_type, only=None, 
     status_color = "green" if 200 <= status_code < 300 else "cyan" if 300 <= status_code < 400 else "yellow" if 400 <= status_code < 500 else "red"
     status_panel = Panel(
         Align.center(f"[bold blue]Time:[/bold blue] {elapsed:.2f} ms  [bold blue]Size:[/bold blue] {format_size(size)}  [bold {status_color}]Status code: {status_code} {reason}[/bold {status_color}]", vertical="middle"),
-        width=151,
+        width=150,
         border_style=status_color,
         title="Status",
         title_align="center",
         expand=True,
     )
     if only is None:
-        table = Table(width=150, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
+        table = Table(width=146, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
         table.add_column("Key", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
         for k, v in headers.items():
             table.add_row(str(k), str(v))
-        headers_panel = Panel(Align.center(table), width=151, title="Headers", border_style="magenta", expand=True)
+        headers_panel = Panel(Align.center(table), width=150, title="Headers", border_style="magenta", expand=True)
 
         if content_type and "application/json" in content_type:
             try:
@@ -246,7 +257,7 @@ def print_response(status_code, reason, headers, body, content_type, only=None, 
                 syntax = Syntax(json.dumps(parsed, indent=2), "json", theme="monokai", line_numbers=True, word_wrap=False)
             except Exception:
                 syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
-            body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
+            body_panel = Panel(syntax, width=150, title="Body", border_style="yellow", expand=True)
         elif content_type and "html" in content_type:
             syntax = Syntax(body, "html", theme="monokai", line_numbers=True, word_wrap=True)
             body_panel = Panel(syntax, title="Body (HTML)", border_style="yellow", expand=True)
@@ -258,23 +269,23 @@ def print_response(status_code, reason, headers, body, content_type, only=None, 
         console.print(Columns([headers_panel, body_panel]))
     else:
         if only == "headers":
-            table = Table(width=150, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
+            table = Table(width=145, show_header=True, header_style="bold magenta", show_lines=True, title_justify="center", title_style="bold magenta")
             table.add_column("Key", style="cyan", no_wrap=True)
             table.add_column("Value", style="white")
             for k, v in headers.items():
                 table.add_row(str(k), str(v))
-                headers_panel = Panel(Align.center(table), width=151, title="Headers", border_style="magenta", expand=True)
+                headers_panel = Panel(Align.center(table), width=150, title="Headers", border_style="magenta", expand=True)
             console.print(headers_panel)
         elif only == "body":
             if content_type and "application/json" in content_type:
                 try:
                     parsed = json.loads(body)
                     syntax = Syntax(json.dumps(parsed, indent=2), "json", theme="monokai", line_numbers=True, word_wrap=False)
-                    body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
+                    body_panel = Panel(syntax, width=150, title="Body", border_style="yellow", expand=True)
                     console.print(body_panel)
                 except Exception:
                     syntax = Syntax(body, "text", theme="monokai", line_numbers=True, word_wrap=True)
-                    body_panel = Panel(syntax, width=151, title="Body", border_style="yellow", expand=True)
+                    body_panel = Panel(syntax, width=150, title="Body", border_style="yellow", expand=True)
                     console.print(body_panel)
             elif content_type and "html" in content_type:
                 syntax = Syntax(body, "html", theme="monokai", line_numbers=True, word_wrap=True)
@@ -313,9 +324,8 @@ def fill_placeholders(obj, variables, prompt_for_missing=False):
     else:
         return obj
 
-def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, render=False, fill_vars=False):
+def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, fill_vars=False, no_history=False, dry_run=False, mock=False, repeat=1, interval=0, verbose=False):
     vars = load_variables()
-    # Always fill placeholders in method, url, headers, and data
     try:
         if fill_vars:
             method_to_use = fill_placeholders(method, vars, prompt_for_missing=True)
@@ -345,106 +355,164 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
         urls = [url_to_use.strip()]
 
     for single_url in urls:
-        try:
-            # Fill placeholders in each URL if needed
-            if fill_vars:
-                single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=True)
-            else:
-                single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=False)
-        except KeyError as e:
-            print(colored(f"Error: {e}", "red", attrs=["bold"]))
-            return
-
-        auth_headers = {}
-        if auth:
-            try:
-                auth_type, auth_value = auth.split(" ", 1)
-                auth_headers = parse_auth(auth_type.lower(), auth_value)
-            except Exception as e:
-                print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
-                continue
-        headers_to_send = headers_to_use.copy()
-        headers_to_send.update(auth_headers)
-
-        if preview:
-            print_request_preview(method_to_use, single_url_filled, headers_to_send, data_to_use)
-            confirm = input(colored("Send this request? (y/N): ", "yellow"))
-            if confirm.lower() != "y":
-                print(colored("Cancelled.", "yellow"))
-                continue
-
-        try:
-            start = time()
-            resp = requests.request(method_to_use, single_url_filled, headers=headers_to_send, json=data_to_use)
-            elapsed = (time() - start) * 1000
-            content_type = resp.headers.get("Content-Type", "")
-            try:
-                body_str = json.dumps(resp.json(), indent=2)
-            except Exception:
-                body_str = resp.text
-            resp_size = len(resp.content)
-            print_response(resp.status_code, resp.reason, dict(resp.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
-
-            if output_file:
+        if repeat > 1 and DEBUG_MODE:
+            for i in range(repeat):
                 try:
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        f.write(f"""Request Method: {method_to_use}
-Status: {resp.status_code} {resp.reason}
+                    if fill_vars:
+                        single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=True)
+                    else:
+                        single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=False)
+                except KeyError as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+                    return
+        else:
+            for single_url in urls:
+                try:
+                    # Fill placeholders in each URL if needed
+                    if fill_vars:
+                        single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=True)
+                    else:
+                        single_url_filled = fill_placeholders(single_url, vars, prompt_for_missing=False)
+                except KeyError as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
+                    return
+            
+
+            auth_headers = {}
+            if auth:
+                try:
+                    auth_type, auth_value = auth.split(" ", 1)
+                    auth_headers = parse_auth(auth_type.lower(), auth_value)
+                except Exception as e:
+                    print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
+                    continue
+            headers_to_send = headers_to_use.copy()
+            headers_to_send.update(auth_headers)
+
+            if preview or (dry_run and DEBUG_MODE):
+                print_request_preview(method_to_use, single_url_filled, headers_to_send, data_to_use)
+                if dry_run:
+                    print(colored("[DRY RUN] No request sent. Use this to verify what would be sent.", "yellow"))
+                    continue
+                confirm = input(colored("Send this request? (y/N): ", "yellow"))
+                if confirm.lower() != "y":
+                    print(colored("Cancelled.", "yellow"))
+                    continue
+
+            try:
+                if mock and DEBUG_MODE:
+                    # Generate a mock response for testing UI/assertions
+                    status_code = random.choice([200, 201, 400, 404, 500])
+                    reason = {200: "OK", 201: "Created", 400: "Bad Request", 404: "Not Found", 500: "Server Error"}[status_code]
+                    mock_headers = {"Content-Type": "application/json"}
+                    mock_body = json.dumps({"mock": True, "status": status_code, "message": "This is a mock response."}, indent=2)
+                    elapsed = random.uniform(10, 100)
+                    resp_size = len(mock_body)
+                    content_type = "application/json"
+                    if verbose:
+                        print(colored("[VERBOSE] MOCK REQUEST", "cyan"))
+                        print(colored(f"Method: {method_to_use}", "green"))
+                        print(colored(f"URL: {single_url_filled}", "yellow"))
+                        print(colored(f"Headers: {json.dumps(headers_to_send, indent=2)}", "white"))
+                        print(colored(f"Data: {json.dumps(data_to_use, indent=2) if data_to_use else None}", "white"))
+                        print(colored("[VERBOSE] MOCK RESPONSE", "cyan"))
+                        print(colored(f"Status: {status_code} {reason}", "green"))
+                        print(colored(f"Headers: {json.dumps(mock_headers, indent=2)}", "white"))
+                        print(colored(f"Body: {mock_body}", "white"))
+                    print_response(status_code, reason, mock_headers, mock_body, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
+                    body_str = mock_body
+                    resp_status = status_code
+                    resp_reason = reason
+                else:
+                    start = time()
+                    resp = requests.request(method_to_use, single_url_filled, headers=headers_to_send, json=data_to_use)
+                    elapsed = (time() - start) * 1000
+                    content_type = resp.headers.get("Content-Type", "")
+                    try:
+                        body_str = json.dumps(resp.json(), indent=2)
+                    except Exception:
+                        body_str = resp.text
+                    resp_size = len(resp.content)
+                    if verbose and DEBUG_MODE:
+                        print(colored("[VERBOSE] REQUEST SENT", "cyan"))
+                        print(colored(f"Method: {method_to_use}", "green"))
+                        print(colored(f"URL: {single_url_filled}", "yellow"))
+                        print(colored(f"Headers: {json.dumps(headers_to_send, indent=2)}", "white"))
+                        print(colored(f"Data: {json.dumps(data_to_use, indent=2) if data_to_use else None}", "white"))
+                        print(colored("[VERBOSE] RESPONSE RECEIVED", "cyan"))
+                        print(colored(f"Status: {resp.status_code} {resp.reason}", "green"))
+                        print(colored(f"Headers: {json.dumps(dict(resp.headers), indent=2)}", "white"))
+                        print(colored(f"Body: {body_str}", "white"))
+                    print_response(resp.status_code, resp.reason, dict(resp.headers), body_str, content_type, only=only, console=console, elapsed=elapsed, size=resp_size)
+                    resp_status = resp.status_code
+                    resp_reason = resp.reason
+
+                if output_file:
+                    try:
+                        with open(output_file, "w", encoding="utf-8") as f:
+                            f.write(f"""Request Method: {method_to_use}
+Status: {resp_status} {resp_reason}
 ============================
 Headers:
-{json.dumps(dict(resp.headers), indent=2)}
+{json.dumps(dict(resp.headers) if not mock else mock_headers, indent=2)}
 ============================
-Boydy:
+Body:
 {body_str}""")
-                    print(colored(f"Response written to '{output_file}'", "green"))
-                except Exception as e:
-                    print(colored(f"Failed to write to output file '{output_file}': {e}", "red"))
+                        print(colored(f"Response written to '{output_file}'", "green"))
+                    except Exception as e:
+                        print(colored(f"Failed to write to output file '{output_file}': {e}", "red"))
 
-            save_history({
-                "method": method_to_use,
-                "url": single_url_filled,
-                "headers": headers_to_send,
-                "data": data_to_use,
-                "output_file": output_file,
-                "only": only,
-                "status": resp.status_code,
-                "elapsed": elapsed,
-                "size": resp_size,
-                "date": datetime.now().isoformat()
-            })
+                # Only save history if not in debug mode or no_history is False
+                if not (DEBUG_MODE and no_history):
+                    save_history({
+                        "method": method_to_use,
+                        "url": single_url_filled,
+                        "headers": headers_to_send,
+                        "data": data_to_use,
+                        "output_file": output_file,
+                        "only": only,
+                        "status": resp_status,
+                        "elapsed": elapsed,
+                        "size": resp_size,
+                        "date": datetime.now().isoformat(),
+                        "body": body_str
+                    })
 
-            if assertion:
-                cond, script_num = assertion, None
-                if ',' in assertion:
-                    cond, script_num = assertion.split(',', 1)
-                    script_num = script_num.strip()
-                passed = False
-                if cond.startswith("status="):
-                    expected = int(cond.split("=", 1)[1])
-                    if resp.status_code == expected:
-                        print(colored(f"Assertion passed: status={expected}", "green"))
-                        passed = True
-                    else:
-                        print(colored(f"Assertion failed: status={resp.status_code} (expected {expected})", "red"))
-                elif cond.startswith("body_contains="):
-                    expected = cond.split("=", 1)[1]
-                    if expected in body_str:
-                        print(colored(f"Assertion passed: body contains '{expected}'", "green"))
-                        passed = True
-                    else:
-                        print(colored(f"Assertion failed: body does not contain '{expected}'", "red"))
+                if assertion:
+                    cond, script_num = assertion, None
+                    if ',' in assertion:
+                        cond, script_num = assertion.split(',', 1)
+                        script_num = script_num.strip()
+                    passed = False
+                    if cond.startswith("status="):
+                        expected = int(cond.split("=", 1)[1])
+                        actual_status = resp_status
+                        if actual_status == expected:
+                            print(colored(f"Assertion passed: status={expected}", "green"))
+                            passed = True
+                        else:
+                            print(colored(f"Assertion failed: status={actual_status} (expected {expected})", "red"))
+                    elif cond.startswith("body_contains="):
+                        expected = cond.split("=", 1)[1]
+                        if expected in body_str:
+                            print(colored(f"Assertion passed: body contains '{expected}'", "green"))
+                            passed = True
+                        else:
+                            print(colored(f"Assertion failed: body does not contain '{expected}'", "red"))
 
-                # Run script if assertion passed and script_num is valid (1-5)
-                if passed and script_num and script_num.isdigit() and 1 <= int(script_num) <= 5:
-                    script_path = os.path.join(SCRIPTS_DIR, f"{script_num}.py")
-                    if os.path.exists(script_path):
-                        print(colored(f"Running script {script_num}...", "cyan"))
-                        os.system(f'python "{script_path}"')
-                    else:
-                        print(colored(f"Script {script_num} not found.", "red"))
+                    # Run script if assertion passed and script_num is valid (1-5)
+                    if passed and script_num and script_num.isdigit() and 1 <= int(script_num) <= 5:
+                        script_path = os.path.join(SCRIPTS_DIR, f"{script_num}.py")
+                        if os.path.exists(script_path):
+                            print(colored(f"Running script {script_num}...", "cyan"))
+                            os.system(f'python "{script_path}"')
+                        else:
+                            print(colored(f"Script {script_num} not found.", "red"))
 
-        except Exception as e:
-            print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            except Exception as e:
+                print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            if repeat > 1 and i < repeat - 1 and interval > 0:
+                pytime.sleep(interval / 1000.0)
 
 def print_request_preview(method, url, headers, data):
     print(colored("REQUEST PREVIEW", "magenta", attrs=["bold"]))
@@ -747,6 +815,7 @@ def main():
     ensure_scripts_folder()
     print_banner()
     collections = load_collections()
+    global DEBUG_MODE
     while True:
         try:
             cmd = input(colored("> ", "magenta", attrs=["bold"]))
@@ -781,9 +850,21 @@ def main():
                 print(colored("cat - View the contents of a file", "cyan"))
                 print(colored("interactive - Interactive request builder", "green"))
                 print(colored("clear - Clear the screen", "cyan"))
+                print(colored("dt - Toggle debug mode", "yellow"))
                 print(colored("exit - Exit the program", "red"))
+                print()
+                print(colored("Debug flags explained (They were mostly used by me during development, won't be much use to the normal user):", "yellow"))
+                print(colored("-dr/--dry-run: Show what would be sent, but don't actually send it. WHY: Prevents mistakes by letting you verify variable substitution and request construction.", "yellow"))
+                print(colored("-mk/--mock: Show a fake response for UI/assertion testing. WHY: Great for testing UI and assertions without a backend.", "yellow"))
+                print(colored("-r/--repeat: Repeat the request N times. WHY: Useful for load/stress testing or debugging rate limits.", "yellow"))
+                print(colored("--interval: Wait between repeated requests (ms). WHY: Simulate pacing or rate limits.", "yellow"))
+                print(colored("-v/--verbose: Print full request/response for transparency and debugging. WHY: See exactly what is sent and received.", "yellow"))
+                print(colored("-nh/--no-history: [DEBUG ONLY] Don't save this request to history. WHY: Avoid cluttering history during debugging.", "yellow"))
             elif cmd.startswith('clear'):
                 print("\033c", end="")
+            elif cmd.startswith('dt'):
+                DEBUG_MODE = not DEBUG_MODE
+                set_debug_mode(DEBUG_MODE)
             elif cmd.startswith('globalaliases'):
                 parser = argparse.ArgumentParser(
                     prog='globalaliases',
@@ -873,6 +954,19 @@ def main():
                 parser.add_argument('-hd', '--headers', help='[Optional] Headers as JSON string')
                 parser.add_argument('-d', '--data', help='[Optional] Body as JSON string')
                 parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='[Optional] Authentication helper: bearer <token> or basic <user>:<pass>')
+                parser.add_argument('-dr', '--dry-run', action='store_true',
+                    help="[DEBUG] Dry run: Show what would be sent, but don't actually send the request. "
+                         "WHY: Prevents mistakes by letting you verify variable substitution and request construction.")
+                parser.add_argument('-mk', '--mock', action='store_true',
+                    help="[DEBUG] Mock response: Do not send a real request, but show a fake response. "
+                         "WHY: Great for testing UI and assertions without a backend.")
+                parser.add_argument('-r', '--repeat', type=int, default=1,
+                    help="[DEBUG] Repeat: Send the request N times. WHY: Useful for load/stress testing or debugging rate limits.")
+                parser.add_argument('-i', '--interval', type=int, default=0,
+                    help="[DEBUG] Interval (ms): Wait this many milliseconds between repeated requests. WHY: Simulate pacing or rate limits.")
+                parser.add_argument('-v', '--verbose', action='store_true',
+                    help="[DEBUG] Verbose: Print full request and response details for debugging. "
+                         "WHY: See exactly what is sent and received.")
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     alias = args.alias
@@ -932,7 +1026,20 @@ def main():
                 parser.add_argument('--assertion', help='[Optional] Assertion to validate response (e.g., status=200, body_contains=keyword)')
                 parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
                 parser.add_argument('-fv', '--fillvars', action='store_true', help='[Optional] Fill placeholders in the request (prompt for variables)')
-                # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
+                parser.add_argument('-nh', '--no-history', action='store_true', help='[DEBUG ONLY] Don\'t save this request to history (for debugging)')
+                parser.add_argument('-dr', '--dry-run', action='store_true',
+                    help="[DEBUG] Dry run: Show what would be sent, but don't actually send the request. "
+                         "WHY: Prevents mistakes by letting you verify variable substitution and request construction.")
+                parser.add_argument('-mk', '--mock', action='store_true',
+                    help="[DEBUG] Mock response: Do not send a real request, but show a fake response. "
+                         "WHY: Great for testing UI and assertions without a backend.")
+                parser.add_argument('-r', '--repeat', type=int, default=1,
+                    help="[DEBUG] Repeat: Send the request N times. WHY: Useful for load/stress testing or debugging rate limits.")
+                parser.add_argument('--interval', type=int, default=0,
+                    help="[DEBUG] Interval (ms): Wait this many milliseconds between repeated requests. WHY: Simulate pacing or rate limits.")
+                parser.add_argument('-v', '--verbose', action='store_true',
+                    help="[DEBUG] Verbose: Print full request and response details for debugging. "
+                         "WHY: See exactly what is sent and received.")
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     alias = args.alias
@@ -942,7 +1049,7 @@ def main():
                     assertion = args.assertion
                     preview = args.preview
                     fill_vars = args.fillvars
-                    # REMOVED: render = args.render
+                    no_history = args.no_history
                     auth_headers = {}
 
                     if args.auth:
@@ -985,8 +1092,13 @@ def main():
                             only,
                             assertion=assertion,
                             preview=preview,
-                            render=False,  # Always False, feature removed
-                            fill_vars=fill_vars
+                            fill_vars=fill_vars,
+                            no_history=no_history,
+                            dry_run=args.dry_run,
+                            mock=args.mock,
+                            repeat=args.repeat,
+                            interval=args.interval,
+                            verbose=args.verbose
                         )
                 except SystemExit:
                     continue
@@ -1008,7 +1120,20 @@ def main():
                 parser.add_argument('-as', '--assert', dest='assertion', help='[Optional] Assertion, e.g. status=200 or body_contains=foo')
                 parser.add_argument('-p', '--preview', action='store_true', help='[Optional] Preview request before sending')
                 parser.add_argument('-fv', '--fillvars', action='store_true', help='[Optional] Fill placeholders in the request (prompt for variables)')
-                # REMOVED: parser.add_argument('-r', '--render', action='store_true', help='[Optional] Render Markdown/HTML response')
+                parser.add_argument('-nh', '--no-history', action='store_true', help='[DEBUG ONLY] Don\'t save this request to history (for debugging)')
+                parser.add_argument('-dr', '--dry-run', action='store_true',
+                    help="[DEBUG] Dry run: Show what would be sent, but don't actually send the request. "
+                         "WHY: Prevents mistakes by letting you verify variable substitution and request construction.")
+                parser.add_argument('-mk', '--mock', action='store_true',
+                    help="[DEBUG] Mock response: Do not send a real request, but show a fake response. "
+                         "WHY: Great for testing UI and assertions without a backend.")
+                parser.add_argument('-r', '--repeat', type=int, default=1,
+                    help="[DEBUG] Repeat: Send the request N times. WHY: Useful for load/stress testing or debugging rate limits.")
+                parser.add_argument('--interval', type=int, default=0,
+                    help="[DEBUG] Interval (ms): Wait this many milliseconds between repeated requests. WHY: Simulate pacing or rate limits.")
+                parser.add_argument('-v', '--verbose', action='store_true',
+                    help="[DEBUG] Verbose: Print full request and response details for debugging. "
+                         "WHY: See exactly what is sent and received.")
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
                     method = args.method.upper()
@@ -1039,7 +1164,8 @@ def main():
                     auth_headers = {}
                     preview = args.preview
                     fill_vars = args.fillvars
-                    # REMOVED: render = args.render
+                    no_history = args.no_history
+
                     if args.auth:
                         try:
                             auth_type, auth_value = args.auth.split(" ", 1)
@@ -1048,7 +1174,23 @@ def main():
                             print(colored(f"Auth error: {e}", "red", attrs=["bold"]))
                             return
                     headers.update(auth_headers)
-                    request(method, url, headers, data, output_file, only, assertion=assertion, preview=preview, render=False, fill_vars=fill_vars)
+                    request(
+                        method,
+                        url,
+                        headers,
+                        data,
+                        output_file,
+                        only,
+                        assertion=assertion,
+                        preview=preview,
+                        fill_vars=fill_vars,
+                        no_history=no_history,
+                        dry_run=args.dry_run,
+                        mock=args.mock,
+                        repeat=args.repeat,
+                        interval=args.interval,
+                        verbose=args.verbose
+                    )
                 except SystemExit:
                     continue
                 except Exception as e:
@@ -1275,6 +1417,7 @@ def main():
                 use_parser.add_argument('name', help='Template name')
                 use_parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='Override authentication for this request')
                 use_parser.add_argument('--only', choices=['body', 'headers', 'status'], help='Output only this part of the response')
+                use_parser.add_argument('-nh', '--no-history', action='store_true', help='[DEBUG ONLY] Don\'t save this request to history (for debugging)')
 
                 # Delete
                 delete_parser = subparsers.add_parser('delete', help='Delete a template')
@@ -1315,6 +1458,7 @@ def main():
                         data = tpl.get('data', {})
                         auth = args.auth if args.auth else tpl.get('auth')
                         only = args.only if args.only else tpl.get('only')
+                        no_history = getattr(args, 'no_history', False)
                         print_request_preview(method, url, headers, data)
                         if input("Send this request? (y/N): ").lower() == "y":
                             request(
@@ -1323,7 +1467,13 @@ def main():
                                 headers,
                                 data,
                                 only=only,
-                                auth=auth
+                                auth=auth,
+                                no_history=no_history,
+                                dry_run=args.dry_run,
+                                mock=args.mock,
+                                repeat=args.repeat,
+                                interval=args.interval,
+                                verbose=args.verbose
                             )
                         else:
                             print(colored("Cancelled.", "yellow"))
