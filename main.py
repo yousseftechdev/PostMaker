@@ -4,6 +4,9 @@ import shlex
 import argparse
 import os
 import requests
+import random
+import time as pytime
+import sys
 from base64 import b64encode
 from difflib import unified_diff
 from time import time
@@ -17,12 +20,17 @@ from rich.markdown import Markdown
 from rich.columns import Columns
 from rich.panel import Panel
 from rich.align import Align
-import random
-import time as pytime
 
 console = Console()
 
-EXECUTION_DIR = os.path.dirname(os.path.abspath(__file__))
+# Check if the script is a brinary
+if getattr(sys, 'frozen', False):
+    # If the script is frozen, use the directory of the executable
+    EXECUTION_DIR = os.path.dirname(sys.executable)
+else:
+    # If the script is not frozen, use the directory of the script
+    EXECUTION_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def rel_path(filename):
     return os.path.join(EXECUTION_DIR, filename)

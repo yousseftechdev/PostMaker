@@ -2,4 +2,3 @@ tests/test.py
 tests/test.txt
 test*
 output.txt
-build*
