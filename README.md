@@ -1,7 +1,7 @@
 # PostMaker
 
 **PostMaker** is a terminal-based API client inspired by Postman, for developers who prefer the command line. It supports sending HTTP requests, managing collections, variables, history, assertions, chaining, diffing, templates, import/export, and more.
-
+###### Name credit (even though it's not that good): [MintyEcho](https://github.com/MintyEcho)
 ---
 
 ## Features
