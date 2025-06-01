@@ -1580,9 +1580,16 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(colored(f"An unexpected error occurred: {e}", "red", attrs=["bold"]))
     except KeyboardInterrupt:
-        print(colored("\nExiting...", "yellow", attrs=["bold"]))
+        # Handle Ctrl+C first before other exceptions
+        try:
+            print(colored("\nExiting…", "yellow", attrs=["bold"]))
+        except Exception:
+            print("\nExiting…")  # Safe fallback if termcolor dies
     except SystemExit:
         pass
+    except Exception as e:
+        try:
+            print(colored(f"An unexpected error occurred: {e}", "red", attrs=["bold"]))
+        except Exception:
+            print(f"An unexpected error occurred: {e}")
