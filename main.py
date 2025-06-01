@@ -3,13 +3,12 @@ import json
 import shlex
 import argparse
 import os
-import requests
-import random
-import time as pytime
 import sys
+from requests import request as rq
+from random import choice, uniform
 from base64 import b64encode
 from difflib import unified_diff
-from time import time
+from time import time, sleep
 from re import sub, match
 from termcolor import colored
 from rich.syntax import Syntax
@@ -35,6 +34,7 @@ else:
 def rel_path(filename):
     return os.path.join(EXECUTION_DIR, filename)
 
+VERSION = "1.0.1"
 COLLECTIONS_FILE = rel_path("data/collections.json")
 HISTORY_FILE = rel_path("data/history.json")
 VARIABLES_FILE = rel_path("data/variables.json")
@@ -42,10 +42,25 @@ GLOBAL_ALIASES_FILE = rel_path("data/global_aliases.json")
 TEMPLATES_FILE = rel_path("data/templates.json")
 SCRIPTS_DIR = rel_path("scripts")
 DEBUG_MODE = False
+DEBUG_MODE_FILE = rel_path("data/debug_mode.json")
+
+def load_debug_mode():
+    global DEBUG_MODE
+    if os.path.exists(DEBUG_MODE_FILE):
+        with open(DEBUG_MODE_FILE, "r", encoding="utf-8") as f:
+            try:
+                DEBUG_MODE = json.load(f).get("debug_mode", False)
+            except Exception:
+                DEBUG_MODE = False
+
+def save_debug_mode():
+    with open(DEBUG_MODE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"debug_mode": DEBUG_MODE}, f)
 
 def set_debug_mode(enabled):
     global DEBUG_MODE
     DEBUG_MODE = enabled
+    save_debug_mode()
     if DEBUG_MODE:
         print(colored("Debug mode is ON", "red", attrs=["bold"]))
     else:
@@ -92,8 +107,9 @@ def color_status(status_code):
 
 def print_banner():
     print(colored("="*60, "magenta"))
-    print(colored("Welcome to PostMaker - A simple TUI PostMan clone for testing REST APIs", "blue", attrs=["bold"]))
+    print(colored(f"PostMaker v{VERSION} - A simple TUI PostMan clone for testing REST APIs", "blue", attrs=["bold"]))
     print(colored("="*60, "magenta"))
+    print(colored(f"Debug Mode: {'ON' if DEBUG_MODE else 'OFF'}", "yellow"))
     print(colored("type `request` to make an API request.", "green"))
     print(colored("type `help` for more information.", "yellow"))
     print(colored("type `clear` to clear the screen.", "cyan"))
@@ -332,7 +348,7 @@ def fill_placeholders(obj, variables, prompt_for_missing=False):
     else:
         return obj
 
-def request(method, url, headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, fill_vars=False, no_history=False, dry_run=False, mock=False, repeat=1, interval=0, verbose=False):
+def request(method="GET", url="https://example.com", headers=None, data=None, output_file=None, only=None, auth=None, assertion=None, preview=False, fill_vars=False, no_history=False, dry_run=False, mock=False, repeat=1, interval=0, verbose=False):
     vars = load_variables()
     try:
         if fill_vars:
@@ -410,11 +426,11 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
             try:
                 if mock and DEBUG_MODE:
                     # Generate a mock response for testing UI/assertions
-                    status_code = random.choice([200, 201, 400, 404, 500])
+                    status_code = choice([200, 201, 400, 404, 500])
                     reason = {200: "OK", 201: "Created", 400: "Bad Request", 404: "Not Found", 500: "Server Error"}[status_code]
                     mock_headers = {"Content-Type": "application/json"}
                     mock_body = json.dumps({"mock": True, "status": status_code, "message": "This is a mock response."}, indent=2)
-                    elapsed = random.uniform(10, 100)
+                    elapsed = uniform(10, 100)
                     resp_size = len(mock_body)
                     content_type = "application/json"
                     if verbose:
@@ -433,7 +449,7 @@ def request(method, url, headers=None, data=None, output_file=None, only=None, a
                     resp_reason = reason
                 else:
                     start = time()
-                    resp = requests.request(method_to_use, single_url_filled, headers=headers_to_send, json=data_to_use)
+                    resp = rq(method_to_use, single_url_filled, headers=headers_to_send, json=data_to_use)
                     elapsed = (time() - start) * 1000
                     content_type = resp.headers.get("Content-Type", "")
                     try:
@@ -520,7 +536,7 @@ Body:
             except Exception as e:
                 print(colored(f"Error: {e}", "red", attrs=["bold"]))
             if repeat > 1 and i < repeat - 1 and interval > 0:
-                pytime.sleep(interval / 1000.0)
+                sleep(interval / 1000.0)
 
 def print_request_preview(method, url, headers, data):
     print(colored("REQUEST PREVIEW", "magenta", attrs=["bold"]))
@@ -821,6 +837,7 @@ def import_data(filename):
 def main():
     ensure_data_files()
     ensure_scripts_folder()
+    load_debug_mode()  # Load debug mode state on startup
     print_banner()
     collections = load_collections()
     global DEBUG_MODE
@@ -833,9 +850,15 @@ def main():
         if cmd != '':
             cmd = cmd.strip()
             if cmd.startswith('exit'):
-                print(colored("Goodbye!", "red", attrs=["bold"]))
-                save_collections(collections)
-                exit()
+                confirm = input(colored("Are you sure you want to exit? (y/N): ", "red"))
+                if confirm.lower() == "y":
+                    print(colored("Goodbye!", "red", attrs=["bold"]))
+                    save_collections(collections)
+                    sys.exit()
+                else:
+                    print(colored("Exit cancelled.", "yellow"))
+            elif cmd.startswith('version'):
+                print(colored(f"PostMaker v{VERSION}", "blue", attrs=["bold"]))
             elif cmd.startswith('help'):
                 print(colored("Available commands:", "blue", attrs=["bold"]))
                 print(colored("request - Make an HTTP request", "green"))
@@ -859,11 +882,13 @@ def main():
                 print(colored("interactive - Interactive request builder", "green"))
                 print(colored("clear - Clear the screen", "cyan"))
                 print(colored("dt - Toggle debug mode", "yellow"))
+                print(colored("reset - Reset all data files", "red"))
+                print(colored("cause-error - Trigger a test error (debug mode only)", "red"))
                 print(colored("exit - Exit the program", "red"))
                 print()
                 print(colored("Debug flags explained (They were mostly used by me during development, won't be much use to the normal user):", "yellow"))
                 print(colored("-dr/--dry-run: Show what would be sent, but don't actually send it. WHY: Prevents mistakes by letting you verify variable substitution and request construction.", "yellow"))
-                print(colored("-mk/--mock: Show a fake response for UI/assertion testing. WHY: Great for testing UI and assertions without a backend.", "yellow"))
+                print(colored("-mk/--mock: Show a fake response for UI/assertions testing. WHY: Great for testing UI and assertions without a backend.", "yellow"))
                 print(colored("-r/--repeat: Repeat the request N times. WHY: Useful for load/stress testing or debugging rate limits.", "yellow"))
                 print(colored("--interval: Wait between repeated requests (ms). WHY: Simulate pacing or rate limits.", "yellow"))
                 print(colored("-v/--verbose: Print full request/response for transparency and debugging. WHY: See exactly what is sent and received.", "yellow"))
@@ -873,6 +898,13 @@ def main():
             elif cmd.startswith('dt'):
                 DEBUG_MODE = not DEBUG_MODE
                 set_debug_mode(DEBUG_MODE)
+            elif cmd.startswith('reset'):
+                confirm = input(colored("Are you sure you want to reset all data files? This will delete all saved data. (y/N): ", "red"))
+                if confirm.lower() == "y":
+                    ensure_data_files()
+                    print(colored("All data files have been reset.", "green"))
+                else:
+                    print(colored("Reset cancelled.", "yellow"))
             elif cmd.startswith('globalaliases'):
                 parser = argparse.ArgumentParser(
                     prog='globalaliases',
@@ -1118,7 +1150,7 @@ def main():
                     prog='request',
                     description='Make an HTTP request. Example: request -m GET -u https://example.com -hd \'{"Authorization": "token"}\' -d \'{"key": "value"}\' -o output.txt --only body'
                 )
-                parser.add_argument('-m', '--method', required=True, help='[Required] HTTP method (GET, POST, etc)')
+                parser.add_argument('-m', '--method', required=False, help='[Optional] HTTP method (GET, POST, etc), default is GET')
                 parser.add_argument('-u', '--url', required=True, help='[Required] Request URL')
                 parser.add_argument('-hd', '--headers', help='[Optional] Headers as JSON string or @file.json')
                 parser.add_argument('-d', '--data', help='[Optional] Body as JSON string or @file.json')
@@ -1144,7 +1176,7 @@ def main():
                          "WHY: See exactly what is sent and received.")
                 try:
                     args = parser.parse_args(shlex.split(cmd)[1:])
-                    method = args.method.upper()
+                    method = args.method.upper() if args.method else 'GET'
                     url = args.url
 
                     # --- Support loading headers/data from JSON files ---
@@ -1274,18 +1306,24 @@ def main():
             elif cmd.startswith('vars'):
                 parser = argparse.ArgumentParser(
                     prog='vars',
-                    description='View, remove, or clear variables.'
+                    description='View, remove, or clear variables.',
+                    exit_on_error=False
                 )
                 parser.add_argument('-rm', '--remove', metavar='KEY', help='[Optional] Remove a variable by key')
                 parser.add_argument('-cl', '--clear', action='store_true', help='[Optional] Clear all variables')
-                args = parser.parse_args(shlex.split(cmd)[1:])
-                if args.clear:
-                    clear_variables()
-                elif args.remove:
-                    remove_variable(args.remove)
-                else:
-                    vars = load_variables()
-                    print(json.dumps(vars, indent=2))
+                try:
+                    args = parser.parse_args(shlex.split(cmd)[1:])
+                    if args.clear:
+                        clear_variables()
+                    elif args.remove:
+                        remove_variable(args.remove)
+                    else:
+                        vars = load_variables()
+                        print(json.dumps(vars, indent=2))
+                except SystemExit:
+                    continue
+                except Exception as e:
+                    print(colored(f"Error: {e}", "red", attrs=["bold"]))
             elif cmd.startswith('importcurl'):
                 # Usage: importcurl "<curl command>" -a alias [-c collection]
                 parser = argparse.ArgumentParser(
@@ -1528,10 +1566,23 @@ def main():
                     continue
                 except Exception as e:
                     print(colored(f"Error: {e}", "red", attrs=["bold"]))
+            elif cmd.startswith('cause-error'):
+                # This command is for testing error handling
+                if DEBUG_MODE:
+                    raise ValueError("This is a test error to demonstrate error handling.")
+                else:
+                    print("Debug mode is off. Cannot cause error.")
             elif cmd.startswith('interactive'):
                 interactive_mode()
             else:
                 print(colored(f"Invalid command: '{cmd.split()[0]}'. Type 'help' for a list of commands.", "red", attrs=["bold"]))
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(colored(f"An unexpected error occurred: {e}", "red", attrs=["bold"]))
+    except KeyboardInterrupt:
+        print(colored("\nExiting...", "yellow", attrs=["bold"]))
+    except SystemExit:
+        pass
