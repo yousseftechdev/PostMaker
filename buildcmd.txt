@@ -1,1 +1,2 @@
-pyinstaller --onefile --distpath ../pmexec/dist --workpath ../pmexec/build --specpath ../pmexec/spec main.py
+Building PostMaker: pyinstaller --onefile --distpath ../pmexec/dist --workpath ../pmexec/build --specpath ../pmexec/spec main.py
+Building dummyAPI: pyinstaller --onefile --distpath ../pmexec/dummyAPI/dist --workpath ../pmexec/dummyAPI/build --specpath ../pmexec/dummyAPI/spec tests/dummyAPI.py
