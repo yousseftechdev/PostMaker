@@ -2,25 +2,7 @@
 
 **PostMaker** is a terminal-based API client inspired by Postman, for developers who prefer the command line. It supports sending HTTP requests, managing collections, variables, history, assertions, chaining, diffing, templates, import/export, and more.
 
----
-
-## Included Dummy API
-
-PostMaker comes with a dummy API (`dummyAPI.py`) built using Flask. This API provides various endpoints to test PostMaker's functionality, including support for different HTTP methods, status codes, redirects, authentication, and more. You can run the dummy API locally to simulate real-world API interactions.
-
-To start the dummy API:
-```sh
-python tests/dummyAPI.py
-```
-
-You can also use the executable for easier use, Linux and Windows versions included
-
-Once running, you can use PostMaker to interact with the dummy API at `http://127.0.0.1:5000`.
-
----
-
 ###### Project title credit (even though it's not that good): [MintyEcho](https://github.com/MintyEcho)
----
 
 ## Features
 
@@ -49,6 +31,20 @@ Once running, you can use PostMaker to interact with the dummy API at `http://12
 - Trigger test errors (debug mode only)
 
 #### ***NOTE: PLEASE use a Terminal/Terminal emulator that supports color, I put a lot of effort into making this look pretty***
+
+---
+## Included Dummy API
+
+PostMaker comes with a dummy API (`dummyAPI.py`) built using Flask. This API provides various endpoints to test PostMaker's functionality, including support for different HTTP methods, status codes, redirects, authentication, and more. You can run the dummy API locally to simulate real-world API interactions.
+
+To start the dummy API:
+```sh
+python tests/dummyAPI.py
+```
+
+You can also use the executable for easier use, Linux and Windows versions included
+
+Once running, you can use PostMaker to interact with the dummy API at `http://127.0.0.1:5000`.
 
 ---
 
