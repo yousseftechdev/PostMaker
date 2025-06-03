@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build with PyInstaller
-        uses: Martin005/pyinstaller-action@v1
+        uses: ./.github/actions/pyinstaller-action
         with:
           spec: main.py
           requirements: requirements.txt
@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build with PyInstaller
-        uses: Martin005/pyinstaller-action@v1
+        uses: ./.github/actions/pyinstaller-action
         with:
           spec: main.py
           requirements: requirements.txt
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build with PyInstaller
-        uses: Martin005/pyinstaller-action@v1
+        uses: ./.github/actions/pyinstaller-action
         with:
           spec: main.py
           requirements: requirements.txt
