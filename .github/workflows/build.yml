@@ -1,23 +1,35 @@
-name: Build Executables
+name: Build Python Executables
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, windows-latest, macos-latest]
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-22.04
+            target: linux
+            shell: bash
+          - os: windows-latest
+            target: windows
+            shell: powershell
+          - os: macos-latest
+            target: macos
+            shell: bash
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,21 +42,25 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
+      - name: Build executable with PyInstaller
         run: |
-          pyinstaller --onefile main.py
-          mkdir -p bin
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            mv dist/main.exe bin/postmaker-windows.exe
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            mv dist/main bin/postmaker-macos
-          else
-            mv dist/main bin/postmaker-linux
-          fi
-        shell: bash
+          pyinstaller main.py --onefile --name postmaker-${{ matrix.target }}
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+      - name: Create bin directory
+        run: |
+          mkdir -p bin
+
+      - name: Move built file to bin directory
+        run: |
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            move dist\\postmaker-${{ matrix.target }}.exe bin\\
+          else
+            mv dist/postmaker-${{ matrix.target }} bin/
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: postmaker-${{ runner.os }}
-          path: bin/
+          name: postmaker-${{ matrix.target }}
+          path: |
+            bin/postmaker-${{ matrix.target }}*
