@@ -11,8 +11,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
       - name: Build with PyInstaller
-        uses: ./.github/actions/pyinstaller-action
+        uses: Martin005/pyinstaller-action@v1
         with:
           spec: main.py
           requirements: requirements.txt
@@ -25,8 +26,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Build with PyInstaller
-        uses: ./.github/actions/pyinstaller-action
+        uses: Martin005/pyinstaller-action@v1
         with:
           spec: main.py
           requirements: requirements.txt
@@ -39,8 +41,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Build with PyInstaller
-        uses: ./.github/actions/pyinstaller-action
+        uses: Martin005/pyinstaller-action@v1
         with:
           spec: main.py
           requirements: requirements.txt
