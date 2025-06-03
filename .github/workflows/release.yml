@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
 
-
 jobs:
   build-linux:
     name: Build on Linux
@@ -30,11 +29,14 @@ jobs:
       - name: Build Executable
         run: pyinstaller --onefile --noconfirm main.py
 
+      - name: Rename Executable
+        run: mv dist/main dist/postmaker-linux
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: postmaker-linux
-          path: dist/
+          path: dist/postmaker-linux
 
   build-windows:
     name: Build on Windows
@@ -56,11 +58,14 @@ jobs:
       - name: Build Executable
         run: pyinstaller --onefile --noconfirm main.py
 
+      - name: Rename Executable
+        run: Rename-Item -Path dist\main.exe -NewName postmaker-windows.exe
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: postmaker-windows
-          path: dist/
+          path: dist/postmaker-windows.exe
 
   build-macos:
     name: Build on macOS
@@ -82,11 +87,14 @@ jobs:
       - name: Build Executable
         run: pyinstaller --onefile --noconfirm main.py
 
+      - name: Rename Executable
+        run: mv dist/main dist/postmaker-macos
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: postmaker-macos
-          path: dist/
+          path: dist/postmaker-macos
 
   release:
     name: Create GitHub Release
@@ -97,26 +105,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: postmaker-linux
-          path: ./release/linux
+          path: ./release
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
         with:
           name: postmaker-windows
-          path: ./release/windows
+          path: ./release
 
       - name: Download macOS Artifact
         uses: actions/download-artifact@v4
         with:
           name: postmaker-macos
-          path: ./release/macos
+          path: ./release
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ./release/linux/*
-            ./release/windows/*
-            ./release/macos/*
+            release/postmaker-linux
+            release/postmaker-windows.exe
+            release/postmaker-macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
