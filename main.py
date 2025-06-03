@@ -901,6 +901,19 @@ def main():
             elif cmd.startswith('reset'):
                 confirm = input(colored("Are you sure you want to reset all data files? This will delete all saved data. (y/N): ", "red"))
                 if confirm.lower() == "y":
+                    # Delete all data files
+                    data_files = [
+                        COLLECTIONS_FILE,
+                        HISTORY_FILE,
+                        VARIABLES_FILE,
+                        GLOBAL_ALIASES_FILE,
+                        TEMPLATES_FILE,
+                        DEBUG_MODE_FILE
+                    ]
+                    for file in data_files:
+                        if os.path.exists(file):
+                            os.remove(file)
+                    # Recreate data files
                     ensure_data_files()
                     print(colored("All data files have been reset.", "green"))
                 else:
