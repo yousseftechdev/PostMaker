@@ -44,6 +44,9 @@ SCRIPTS_DIR = rel_path("scripts")
 DEBUG_MODE = False
 DEBUG_MODE_FILE = rel_path("data/debug_mode.json")
 
+def set_terminal_title(title):
+    sys.stdout.write(f"\x1b]2;{title}\x07")
+
 def load_debug_mode():
     global DEBUG_MODE
     if os.path.exists(DEBUG_MODE_FILE):
@@ -1591,6 +1594,7 @@ def main():
                 print(colored(f"Invalid command: '{cmd.split()[0]}'. Type 'help' for a list of commands.", "red", attrs=["bold"]))
 
 if __name__ == "__main__":
+    set_terminal_title("PostMaker")
     try:
         main()
     except KeyboardInterrupt:
