@@ -1,2 +1,49 @@
-name: PyInstaller Action
-uses: Martin005/pyinstaller-action@v1.2.0
+name: Build Python Executables
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build on Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with PyInstaller
+        uses: Martin005/pyinstaller-action@v1
+        with:
+          spec: main.py
+          requirements: requirements.txt
+          options: --onefile, --noconfirm
+          python_ver: 3.10
+          upload_exe_with_name: postmaker-linux
+
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with PyInstaller
+        uses: Martin005/pyinstaller-action@v1
+        with:
+          spec: main.py
+          requirements: requirements.txt
+          options: --onefile, --noconfirm
+          python_ver: 3.10
+          upload_exe_with_name: postmaker-windows
+
+  build-macos:
+    name: Build on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with PyInstaller
+        uses: Martin005/pyinstaller-action@v1
+        with:
+          spec: main.py
+          requirements: requirements.txt
+          options: --onefile, --noconfirm
+          python_ver: 3.10
+          upload_exe_with_name: postmaker-macos
