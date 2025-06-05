@@ -34,7 +34,7 @@ else:
 def rel_path(filename):
     return os.path.join(EXECUTION_DIR, filename)
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 COLLECTIONS_FILE = rel_path("data/collections.json")
 HISTORY_FILE = rel_path("data/history.json")
 VARIABLES_FILE = rel_path("data/variables.json")
