@@ -1,18 +1,1 @@
-{
-  "test": {
-    "example": {
-      "method": "GET",
-      "url": "https://example.com",
-      "headers": {},
-      "data": {
-        "key": "value"
-      }
-    },
-    "local": {
-      "method": "GET",
-      "url": "{{localurl}}",
-      "headers": {},
-      "data": null
-    }
-  }
-}
+{}

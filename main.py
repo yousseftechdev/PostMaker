@@ -739,16 +739,18 @@ def interactive_mode():
     else:
         print(colored("Cancelled.", "yellow"))
 
-def template_save(name, method, url, headers, data):
+def template_save(name, method, url, headers, data, **kwargs):
     templates = load_templates()
-    templates[name] = {
+    template = {
         "method": method,
         "url": url,
         "headers": headers,
-        "data": data
+        "data": data,
+        "flags": kwargs  # Save all additional flags as a dictionary
     }
+    templates[name] = template
     save_templates(templates)
-    print(colored(f"Template '{name}' saved.", "green"))
+    print(colored(f"Template '{name}' saved with all details.", "green"))
 
 def template_list():
     templates = load_templates()
@@ -769,14 +771,22 @@ def template_use(name):
     if not tpl:
         print(colored(f"Template '{name}' not found.", "yellow"))
         return
-    print_request_preview(tpl['method'], tpl['url'], tpl.get('headers', {}), tpl.get('data', {}))
+
+    # Extract saved details
+    method = tpl.get('method')
+    url = tpl.get('url')
+    headers = tpl.get('headers', {})
+    data = tpl.get('data', {})
+    flags = tpl.get('flags', {})  # Retrieve saved flags
+
+    print_request_preview(method, url, headers, data)
     if input("Send this request? (y/N): ").lower() == "y":
         request(
-            tpl['method'],
-            tpl['url'],
-            tpl.get('headers', {}),
-            tpl.get('data', {}),
-            fill_vars=True
+            method,
+            url,
+            headers,
+            data,
+            **flags  # Pass all saved flags to the request function
         )
     else:
         print(colored("Cancelled.", "yellow"))
@@ -1091,7 +1101,7 @@ def main():
                          "WHY: Great for testing UI and assertions without a backend.")
                 parser.add_argument('-r', '--repeat', type=int, default=1,
                     help="[DEBUG] Repeat: Send the request N times. WHY: Useful for load/stress testing or debugging rate limits.")
-                parser.add_argument('--interval', type=int, default=0,
+                parser.add_argument('-i', '--interval', type=int, default=0,
                     help="[DEBUG] Interval (ms): Wait this many milliseconds between repeated requests. WHY: Simulate pacing or rate limits.")
                 parser.add_argument('-v', '--verbose', action='store_true',
                     help="[DEBUG] Verbose: Print full request and response details for debugging. "
@@ -1185,7 +1195,7 @@ def main():
                          "WHY: Great for testing UI and assertions without a backend.")
                 parser.add_argument('-r', '--repeat', type=int, default=1,
                     help="[DEBUG] Repeat: Send the request N times. WHY: Useful for load/stress testing or debugging rate limits.")
-                parser.add_argument('--interval', type=int, default=0,
+                parser.add_argument('-i', '--interval', type=int, default=0,
                     help="[DEBUG] Interval (ms): Wait this many milliseconds between repeated requests. WHY: Simulate pacing or rate limits.")
                 parser.add_argument('-v', '--verbose', action='store_true',
                     help="[DEBUG] Verbose: Print full request and response details for debugging. "
@@ -1468,9 +1478,16 @@ def main():
                 save_parser.add_argument('-u', '--url', required=True, help='Request URL')
                 save_parser.add_argument('-hd', '--headers', default="{}", help='Headers as JSON string')
                 save_parser.add_argument('-d', '--data', default="{}", help='Body as JSON string')
+                save_parser.add_argument('-o', '--output', default="output.txt", help='Output file')
                 save_parser.add_argument('--auth', metavar='"bearer TOKEN" or "basic USER:PASS"', help='Authentication helper: bearer <token> or basic <user>:<pass>')
                 save_parser.add_argument('--only', choices=['body', 'headers', 'status'], help='Output only this part of the response')
-
+                save_parser.add_argument('-nh', '--no-history', action='store_true', help='[DEBUG ONLY] Don\'t save this request to history (for debugging)')
+                save_parser.add_argument('-dr', '--dry-run', action='store_true', help='Dry run: Show what would be sent, but don\'t actually send it.')
+                save_parser.add_argument('-mk', '--mock', action='store_true', help='Mock response: Do not send a real request, but show a fake response.')
+                save_parser.add_argument('-r', '--repeat', type=int, default=1, help='Repeat the request N times.')
+                save_parser.add_argument('-i', '--interval', type=int, default=0, help='Wait this many milliseconds between repeated requests.')
+                save_parser.add_argument('-v', '--verbose', action='store_true', help='Verbose: Print full request and response details.')
+               
                 # List
                 list_parser = subparsers.add_parser('list', help='List all templates')
 
@@ -1494,17 +1511,22 @@ def main():
                             "method": args.method,
                             "url": args.url,
                             "headers": headers,
-                            "data": data
+                            "data": data,
+                            "output": args.output,
+                            "auth": args.auth,
+                            "only": args.only,
+                            "no_history": args.no_history,
+                            "dry_run": args.dry_run,
+                            "mock": args.mock,
+                            "repeat": args.repeat,
+                            "interval": args.interval,
+                            "verbose": args.verbose
                         }
-                        if args.auth:
-                            tpl["auth"] = args.auth
-                        if args.only:
-                            tpl["only"] = args.only
-                        # Add more fields as needed
+                        # Save the template
                         templates = load_templates()
                         templates[args.name] = tpl
                         save_templates(templates)
-                        print(colored(f"Template '{args.name}' saved.", "green"))
+                        print(colored(f"Template '{args.name}' saved with all details.", "green"))
                     elif args.subcmd == 'list':
                         template_list()
                     elif args.subcmd == 'use':
@@ -1513,14 +1535,22 @@ def main():
                         if not tpl:
                             print(colored(f"Template '{args.name}' not found.", "yellow"))
                             return
-                        # Allow override of auth/only
+
+                        # Allow override of specific flags or use defaults
                         method = tpl.get('method')
                         url = tpl.get('url')
                         headers = tpl.get('headers', {})
                         data = tpl.get('data', {})
+                        output_file = tpl.get('output', 'output.txt')
                         auth = args.auth if args.auth else tpl.get('auth')
                         only = args.only if args.only else tpl.get('only')
-                        no_history = getattr(args, 'no_history', False)
+                        no_history = args.no_history if hasattr(args, 'no_history') else tpl.get('no_history', False)
+                        dry_run = tpl.get('dry_run', False)
+                        mock = tpl.get('mock', False)
+                        repeat = tpl.get('repeat', 1)
+                        interval = tpl.get('interval', 0)
+                        verbose = tpl.get('verbose', False)
+
                         print_request_preview(method, url, headers, data)
                         if input("Send this request? (y/N): ").lower() == "y":
                             request(
@@ -1528,14 +1558,15 @@ def main():
                                 url,
                                 headers,
                                 data,
+                                output_file=output_file,
                                 only=only,
                                 auth=auth,
                                 no_history=no_history,
-                                dry_run=args.dry_run,
-                                mock=args.mock,
-                                repeat=args.repeat,
-                                interval=args.interval,
-                                verbose=args.verbose
+                                dry_run=dry_run,
+                                mock=mock,
+                                repeat=repeat,
+                                interval=interval,
+                                verbose=verbose
                             )
                         else:
                             print(colored("Cancelled.", "yellow"))
